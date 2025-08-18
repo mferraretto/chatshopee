@@ -3,27 +3,11 @@ services:
     name: duoke-console
     env: docker
     plan: free
-    region: oregon           # opcional
     autoDeploy: true
-
-    # >>> Diga ao Render qual Dockerfile usar e de onde é o contexto:
-    dockerfilePath: Dockerfile
-    dockerContext: .
-
-    # Health check leve (crie a rota /healthz na sua FastAPI)
-    healthCheckPath: /healthz
-
-    # Variáveis (as sensíveis você pode deixar sem valor aqui e setar no painel)
+    healthCheckPath: /
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
-      - key: HEADLESS
-        value: "1"
-      - key: NAV_TIMEOUT_MS
-        value: "90000"
-      # Recomendo definir estas duas no painel (Settings → Environment), para não versionar segredo:
-      - key: DUOKE_EMAIL
-        sync: false
-      - key: DUOKE_PASSWORD
-        sync: false
-
+      # Se seu settings ler envs, você pode já definir aqui:
+      # - key: DOUKE_URL
+      #   value: "https://seu-duoke-url"

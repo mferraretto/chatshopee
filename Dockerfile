@@ -1,36 +1,27 @@
-FROM python:3.11-slim
+# Usa a imagem oficial do Playwright com browsers já instalados
+FROM mcr.microsoft.com/playwright/python:v1.46.0-jammy
 
+# Impede Python de gerar .pyc e usa stdout sem buffer
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    DEBIAN_FRONTEND=noninteractive
+    # Playwright/Chromium flags para Render (sem sandbox)
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PYPPETEER_EXECUTABLE_PATH=/ms-playwright/chromium-1124/chrome-linux/chrome
 
 WORKDIR /app
 
-# 1) Bibliotecas nativas necessárias pro Chromium + fontes (evitam travas de “waiting for fonts”)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl wget gnupg \
-    # libs de runtime
-    libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdbus-1-3 \
-    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-    libgtk-3-0 libnspr4 libnss3 libwayland-client0 libxshmfence1 \
-    libx11-6 libx11-xcb1 libxcb1 libxext6 libxss1 libexpat1 \
-    libgbm1 libglib2.0-0 libpango-1.0-0 libpangocairo-1.0-0 \
-    # fontes
-    fonts-noto fonts-noto-color-emoji fonts-liberation fonts-unifont fontconfig \
-    && rm -rf /var/lib/apt/lists/*
+# Só copie os arquivos que mudam pouco para cachear melhor
+COPY requirements.txt /app/
 
-# 2) Python deps
-COPY requirements.txt ./
+# Instala as libs Python do seu projeto
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3) Playwright + navegadores (sem --with-deps para não chamar o script de Ubuntu)
-RUN pip install --no-index "playwright==1.46.0" && playwright install chromium
+# Copia o resto do código
+COPY . /app
 
-# 4) Código da sua aplicação
-COPY . .
+# Porta do Render
+ENV PORT=10000
 
-# 5) A porta padrão do FastAPI, por padrão o uvicorn expõe a 8000
-EXPOSE 8000
-
-CMD ["uvicorn", "app_ui:app", "--host", "0.0.0.0", "--port", "8000"]
+# Comando de start (Uvicorn com a sua app)
+CMD ["uvicorn", "app_ui:app", "--host", "0.0.0.0", "--port", "10000"]
