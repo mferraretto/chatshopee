@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: duoke-console
+    env: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # Se seu settings ler envs, você pode já definir aqui:
+      # - key: DOUKE_URL
+      #   value: "https://seu-duoke-url"

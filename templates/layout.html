@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ title or "Duoke Console" }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="/static/app.css" rel="stylesheet" />
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; background:#0b0c0f; color:#e6e8eb; font:14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji"; }
+    .topbar{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:10px 16px; border-bottom:1px solid #1b1e24; background:#0f1116; position:sticky; top:0; z-index:5;
+    }
+    .topbar h1{ margin:0; font-size:16px; font-weight:600; display:flex; align-items:center; gap:10px;}
+    .pill {font-size:12px; padding:3px 8px; border-radius:999px; border:1px solid #2a3140; background:#111722; color:#b9c2d0;}
+    nav a{ color:#c9d4e1; text-decoration:none; margin-left:14px; padding:6px 8px; border-radius:8px; }
+    nav a.active, nav a:hover{ background:#141a24; }
+    main{ padding:16px; max-width:1400px; margin:0 auto; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <h1>
+      Duoke Console
+      <span id="status-pill" class="pill">Status: <strong id="status-text">{{ status or "IDLE" }}</strong></span>
+    </h1>
+    <nav>
+      <a href="/" data-nav="/">Ativo</a>
+      <a href="/settings" data-nav="/settings">Configurações</a>
+      <a href="/rules" data-nav="/rules">Regras</a>
+    </nav>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <script>
+    // marca item ativo pela URL atual
+    (function () {
+      const here = location.pathname.replace(/\/+$/,'') || '/';
+      document.querySelectorAll('nav a[data-nav]').forEach(a=>{
+        const path = a.getAttribute('data-nav');
+        if (path === here) a.classList.add('active');
+      });
+    })();
+    // opcional: atualiza pill se o backend injetar window.APP_STATE.running via template
+    (function () {
+      const pill = document.getElementById('status-text');
+      try {
+        if (window.APP_STATE && typeof window.APP_STATE.running === 'boolean') {
+          pill.textContent = window.APP_STATE.running ? 'RUNNING' : 'IDLE';
+        }
+      } catch(_) {}
+    })();
+  </script>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
+

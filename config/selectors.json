@@ -1,0 +1,21 @@
+{
+  "chat_list_item": ".list_container_content .virtual_list .list > li, .contact_list .virtual_list .list > li",
+
+  "message_container": "ul.message_main.watermark_shopee, ul.message_main",
+
+  "buyer_message": "ul.message_main li.lt .msg_text .text_cont, ul.message_main li.lt .text_cont, ul.message_main li.lt .bubble .text, ul.message_main li.lt .record_item .content",
+
+  "message_text": "ul.message_main .msg_text .text_cont, ul.message_main .text_cont, ul.message_main .bubble .text, ul.message_main .record_item .content",
+
+  "input_textarea": ".chat_footer textarea.el-textarea__inner, .input_wrap textarea.el-textarea__inner, textarea.el-textarea__inner",
+
+  "send_button": "button:has-text('Send'), button:has-text('Enviar')",
+
+  "filter_needs_reply": "text=Precisa responder, text=Need Reply, text=Pending Reply",
+
+  "tag_modal": ".el-dialog.select_label_dialog, .el-dialog:has(.select_label_content), .el-dialog__wrapper:has(.select_label_content)",
+
+  "tag_item": ".label_container .label_item .label_item_name, .label_container .label_item, span.label_item_name",
+
+  "tag_confirm": ".el-dialog__footer .el-button--primary, .select_label_dialog .el-button--primary"
+}

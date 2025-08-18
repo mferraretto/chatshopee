@@ -1,0 +1,45 @@
+{
+  "quebra_3_opcoes": "Sinto muito pelo ocorrido! 😔 Para resolver da forma mais rápida possível, podemos seguir de 3 maneiras:\n1️⃣ **Reembolso parcial** — você fica com o produto e recebe parte do valor de volta.\n2️⃣ **Devolução com reembolso total** — devolve pelo app da Shopee e recebe o valor integral assim que o produto chegar de volta.\n3️⃣ **Envio de nova peça** — sem custo pela peça; você paga apenas o frete (ou usa cupom de frete grátis, se disponível), e não precisa devolver a peça atual.\n\nMe envie, por favor, **fotos bem claras** mostrando o defeito/dano, e me diga qual opção prefere que eu já providencio.",
+  
+  "faltando_peca": "Peço desculpas pelo transtorno! 😔 Para resolver, posso:\n• **Enviar a peça que faltou** imediatamente (sem custo pela peça, apenas frete se aplicável), ou\n• **Fazer o reembolso** referente ao item ausente.\n\nPor favor, me envie **foto da embalagem e do produto recebido**, para registro, e me informe qual das opções prefere.",
+  
+  "tempo_envio": "Oii, tudo bem? As compras feitas hoje são enviadas amanhã pela manhã, e chegam em média de **3 a 5 dias úteis**.",
+  
+  "quebrado_sem_foto": "Sinto muito pelo ocorrido! 😔 Para te ajudar da forma mais rápida possível, poderia me enviar **fotos bem nítidas** mostrando o defeito/dano? Assim consigo validar internamente e apresentar as opções de solução sem demora.",
+  
+  "quebrado_com_foto": "Vi as fotos, obrigado por enviar! Podemos resolver de 3 formas:\n1️⃣ **Reembolso parcial** — você fica com o produto e recebe parte do valor de volta.\n2️⃣ **Devolução com reembolso total** — devolve pelo app da Shopee e recebe o valor integral assim que o produto chegar de volta.\n3️⃣ **Envio de nova peça** — sem custo pela peça; você paga apenas o frete (ou usa cupom de frete grátis, se disponível), e não precisa devolver a peça atual.\n\nMe diga qual opção prefere que eu já providencio.",
+  
+  "reembolso_parcial": "Para solicitar **reembolso parcial** pelo app da Shopee:\n1. Acesse *Minhas Compras*.\n2. Selecione o pedido.\n3. Clique em *Devolver/Reembolsar*.\n4. Escolha *Reembolso Parcial* e adicione fotos e descrição do problema.\n\nSe precisar, posso te orientar durante o processo.",
+  
+  "nova_peca_pagando_frete": "O frete costuma sair barato e pode ser grátis se usar cupom de frete da Shopee. Você pode calcular por este anúncio de R$ 2,00 e concluir a compra para receber a nova peça completa.",
+  
+  "devolucao_total": "A devolução e reembolso total são feitos pelo app da Shopee:\n1. Vá em *Minhas Compras* > selecione o pedido > *Pedido de Reembolso*.\n2. Escolha o motivo e envie fotos se necessário.\n3. Após a Shopee receber o produto, o valor é reembolsado integralmente.",
+  
+  "pedido_cancelado": "Sinto muito pelo problema! 😔 A Shopee Express é responsável pelo envio, e infelizmente não tenho controle sobre cancelamentos de transporte. Sugiro abrir um chamado no app em *Ajuda* para registro imediato. Enquanto isso, posso te oferecer um cupom de desconto caso ainda tenha interesse na peça.",
+  
+  "pedido_parado": "Entendo a frustração com a demora. 😔 Já abri um chamado com urgência para a transportadora via Shopee. Você também pode reforçar no app: *Ajuda > Pedido atrasado*. Assim conseguimos mais prioridade no seu caso.",
+  
+  "cilindro_pequeno": "Esse anúncio é referente ao **trio compacto** (3 peças menores), como mostrado na descrição e nas medidas. Para atingir o tamanho padrão, muitos clientes usam 2 trios compactos. Se quiser completar, ofereço 25% de desconto no segundo trio.",
+  
+  "confirm_reembolso_parcial": "Posso prosseguir com o **reembolso parcial**. Me confirma se deseja manter o produto e qual valor considera justo, ou posso abrir direto o pedido no app para você acompanhar.",
+  
+  "confirm_devolucao_total": "Tudo bem, seguimos com **devolução e reembolso total**. Abra pelo app: *Minhas Compras > selecione o pedido > Pedido de Reembolso* e envie o motivo e as fotos. Assim que a Shopee confirmar a devolução, o reembolso é feito por eles.",
+  
+  "confirm_envio_nova_peca": "Certo! Vamos de **envio de nova peça**. Mando sem custo pela peça; você paga apenas o frete (ou usa cupom de frete grátis). Posso gerar o link agora mesmo — quer que eu prossiga?",
+  
+  "contato_shopee_reembolso": "Sinto muito pela situação. 😔 Como o reembolso é analisado e pago pela Shopee, recomendo falar diretamente no app informando que o **reembolso parcial foi negado**. Eles verificam no mesmo protocolo e orientam o próximo passo.",
+  
+  "elogio": "Oba! Muito obrigada pelo carinho 😊 Se precisar de algo ou tiver alguma dúvida, é só chamar!",
+  
+  "envio": "Seu pedido já foi enviado e está em trânsito pela Shopee Xpress. Você pode acompanhar o rastreio pelo app. Qualquer dúvida, estou à disposição!",
+  
+  "agradecimento_generico": "Agradecemos pela compra e confiança 😊 Conte conosco para qualquer dúvida ou necessidade.",
+  
+  "default": "Obrigado pela mensagem! Para agilizar o atendimento, envie por favor o número do pedido e, se possível, fotos ou detalhes do caso.",
+  
+  "nao_recebido_marcado_recebido": "Sinto muito pelo transtorno! 😔 Vi que o pedido consta como entregue/recebido, mas você não recebeu. Por favor:\n1️⃣ Confirme com vizinhos/porteiro se ficou com alguém por engano.\n2️⃣ Se não localizar, abra no app Shopee: *Ajuda > Não recebi meu pedido* e informe que o entregador marcou como recebido.\n\nMe envie o número do pedido e, se possível, um print da tela que mostra “recebido”. Vou priorizar seu caso.",
+"valor_reembolso_parcial": "Nosso padrão para **reembolso parcial** é **30% do valor pago**. Ex.: se o seu pedido foi de {ORDER_TOTAL}, o parcial ficaria em **{PARTIAL_30}**. Caso prefira sugerir um valor diferente, me avise que avalio aqui. Se decidir, também posso te orientar na abertura pelo app."
+
+}
+
+

@@ -1,0 +1,21 @@
+[
+  {
+    "id": "quebra_dano",
+    "active": true,
+    "match": { "any_contains": ["quebrado", "quebrada", "rachou", "rachado"] },
+    "reply": "Olá! Sentimos muito pelo ocorrido. Podemos resolver de 3 formas:\n Reembolso parcial — você fica com o produto e recebe parte do valor de volta.\n Devolução pelo app da Shopee — com reembolso total após o retorno.\n Envio de nova peça — sem custo pela peça, você paga apenas o frete, e não precisa devolver nada.\nMe avisa qual opção prefere que resolvo tudo por aqui!"
+  },
+  {
+    "id": "faltando_peca",
+    "active": true,
+    "match": { "any_contains": ["faltou", "faltando", "não veio", "nao veio", "veio faltando"] },
+    "reply": "Oii, tudo bem? Peço desculpas por isso, posso estar te enviando a peça que faltou, ou se preferir posso fazer seu reembolso, o que você prefere?"
+  },
+  {
+    "id": "pix_pendente",
+    "active": true,
+    "match": { "any_contains": ["pix", "comprovante", "reembolso nao caiu", "não recebi o pix", "não caiu"] },
+    "action": "skip"
+  }
+]
+
