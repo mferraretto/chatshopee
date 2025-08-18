@@ -1,34 +1,27 @@
-FROM python:3.12-slim
+# Usa a imagem oficial do Playwright com browsers já instalados
+FROM mcr.microsoft.com/playwright/python:v1.46.0-jammy
 
-ENV PYTHONUNBUFFERED=1 \
+# Impede Python de gerar .pyc e usa stdout sem buffer
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    # Playwright/Chromium flags para Render (sem sandbox)
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PYPPETEER_EXECUTABLE_PATH=/ms-playwright/chromium-1124/chrome-linux/chrome
 
 WORKDIR /app
 
-# 1) Dependências do sistema compatíveis com Debian 12/Bookworm
-# (sem ttf-unifont/ttf-ubuntu-font-family)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates wget unzip \
-    libglib2.0-0 libnss3 libnspr4 \
-    libatk1.0-0 libatk-bridge2.0-0 \
-    libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 \
-    libgbm1 libasound2 \
-    libpangocairo-1.0-0 libpango-1.0-0 libcairo2 \
-    fonts-liberation fonts-unifont fonts-ubuntu fonts-noto-color-emoji \
-  && rm -rf /var/lib/apt/lists/*
+# Só copie os arquivos que mudam pouco para cachear melhor
+COPY requirements.txt /app/
 
-# 2) Dependências Python
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir playwright==1.46.0
+# Instala as libs Python do seu projeto
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 3) Baixa somente o Chromium (sem tentar instalar deps via APT)
-RUN python -m playwright install chromium
+# Copia o resto do código
+COPY . /app
 
-# 4) Copia o app
-COPY . .
-
-# 5) Porta e comando
+# Porta do Render
 ENV PORT=10000
+
+# Comando de start (Uvicorn com a sua app)
 CMD ["uvicorn", "app_ui:app", "--host", "0.0.0.0", "--port", "10000"]
