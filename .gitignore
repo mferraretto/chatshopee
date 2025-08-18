@@ -1,0 +1,28 @@
+# venv / dependências locais
+.venv*/
+env/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Playwright / Chrome user-data & caches
+pw-user-data/
+storage_state.json
+screenshots/
+*.log
+
+# SO / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Credenciais locais
+.env
+.env.*
+
+# Builds temporários
+dist/
+build/

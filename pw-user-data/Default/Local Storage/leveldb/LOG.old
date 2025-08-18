@@ -1,8 +1,0 @@
-2025/08/16-12:55:55.755 1b98 Reusing MANIFEST C:\Users\Usuario\OneDrive\Área de Trabalho\duoke-gemini-bot\pw-user-data\Default\Local Storage\leveldb/MANIFEST-000001
-2025/08/16-12:55:55.768 1b98 Recovering log #3
-2025/08/16-12:55:55.769 1b98 Level-0 table #3: started
-2025/08/16-12:55:55.778 1b98 Level-0 table #3: 24926 bytes OK
-2025/08/16-12:55:55.778 1b98 Recovering log #4
-2025/08/16-12:55:55.788 1b98 Reusing old log C:\Users\Usuario\OneDrive\Área de Trabalho\duoke-gemini-bot\pw-user-data\Default\Local Storage\leveldb/000004.log 
-2025/08/16-12:55:55.792 1b98 Delete type=0 #3
-2025/08/16-12:55:55.792 1b98 Delete type=2 #5
