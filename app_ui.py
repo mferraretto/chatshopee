@@ -278,7 +278,7 @@ document.getElementById('duoke-connect').addEventListener('submit', async (e)=>{
   }finally{
     btn.disabled = false;
     btn.textContent = 'Conectar ao Duoke';
-    refreshDiokeStatus = null; // noop
+    refreshDuokeStatus = null; // noop
     await refreshDuokeStatus();
   }
 });
@@ -307,6 +307,11 @@ app = FastAPI()
 static_dir = Path("static")
 if static_dir.exists() and static_dir.is_dir():
     app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/healthz")
+async def healthz():
+    """Health check endpoint to satisfy Render's health check."""
+    return {"status": "ok"}
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -547,7 +552,7 @@ async def _run_cycle(run_once: bool):
             await _bot.run_forever(hook, idle_seconds=5.0)
     except Exception as e:
         LAST_ERR = f"{type(e).__name__}: {e}"
-        log(f"[ERROR] {type(e).__name__}: {e}")
+    log(f"[ERROR] {type(e).__name__}: {e}")
     finally:
         try:
             mirror_task.cancel()
