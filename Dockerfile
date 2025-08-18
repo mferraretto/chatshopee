@@ -18,5 +18,5 @@ COPY . .
 ENV PORT=10000
 
 # Start: respeita $PORT e aponta para o módulo correto
-CMD ["sh","-c","uvicorn src.app_ui:app --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["sh","-c","uvicorn app_ui:app --host 0.0.0.0 --port ${PORT:-10000}"]
 
