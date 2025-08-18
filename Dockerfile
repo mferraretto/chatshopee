@@ -1,27 +1,22 @@
-# Usa a imagem oficial do Playwright com browsers já instalados
+# Usa imagem com Playwright + browsers já instalados
 FROM mcr.microsoft.com/playwright/python:v1.46.0-jammy
 
-# Impede Python de gerar .pyc e usa stdout sem buffer
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    # Playwright/Chromium flags para Render (sem sandbox)
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    PYPPETEER_EXECUTABLE_PATH=/ms-playwright/chromium-1124/chrome-linux/chrome
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
-# Só copie os arquivos que mudam pouco para cachear melhor
-COPY requirements.txt /app/
-
-# Instala as libs Python do seu projeto
+# Cache melhor do pip
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia o resto do código
-COPY . /app
+# Copia o código
+COPY . .
 
-# Porta do Render
+# Porta padrão (Render passa $PORT em runtime)
 ENV PORT=10000
 
-# Comando de start (Uvicorn com a sua app)
-CMD ["uvicorn", "app_ui:app", "--host", "0.0.0.0", "--port", "10000"]
+# Start: respeita $PORT e aponta para o módulo correto
+CMD ["sh","-c","uvicorn src.app_ui:app --host 0.0.0.0 --port ${PORT:-10000}"]
+
