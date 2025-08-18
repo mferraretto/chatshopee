@@ -10,7 +10,7 @@ if sys.platform.startswith("win"):
 
 import base64, json, time, os
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional, Set, Dict
 from collections import deque
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTPException
@@ -585,3 +585,4 @@ async def post_rules(req: Request):
         return JSONResponse({"ok": True})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao salvar regras: {e}")
+
