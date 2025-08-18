@@ -25,11 +25,12 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 3) Playwright + navegadores (sem --with-deps para não chamar o script de Ubuntu)
-RUN pip install --no-cache-dir playwright==1.46.0 && \
-    playwright install chromium
+RUN pip install --no-index "playwright==1.46.0" && playwright install chromium
 
-# 4) Código
+# 4) Código da sua aplicação
 COPY . .
 
-ENV PORT=10000
-CMD ["sh","-c","uvicorn app_ui:app --host 0.0.0.0 --port ${PORT:-10000}"]
+# 5) A porta padrão do FastAPI, por padrão o uvicorn expõe a 8000
+EXPOSE 8000
+
+CMD ["uvicorn", "app_ui:app", "--host", "0.0.0.0", "--port", "8000"]
