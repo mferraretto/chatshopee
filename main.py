@@ -8,204 +8,164 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-# ===== Config =====
-SESS_DIR = Path("sessions"); SESS_DIR.mkdir(exist_ok=True)
-SECRET = os.getenv("SESSION_ENC_SECRET", "troque-isto-no-render")  # defina no Render
+# ===== Configurações =====
+SESS_DIR = Path("sessions")
+SESS_DIR.mkdir(exist_ok=True)
+SECRET = os.getenv("SESSION_ENC_SECRET", "troque-isto-no-render")  # Defina no Render
 LOGIN_WAIT_TIMEOUT = 180000  # ms (3 min) para esperar dashboard após verificar código
+BASE_URL = "https://painel.duoke.com"
 
 # ===== Cripto AES-GCM com PBKDF2 (igual ao seu padrão) =====
+# Deriva uma chave a partir de uma senha e salt
 def _derive_key(secret: str, salt: bytes) -> bytes:
-    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100_000)
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100_000
+    )
     return kdf.derive(secret.encode("utf-8"))
 
+# Criptografa dados com AES-GCM
 def encrypt_bytes(data: bytes, secret: str) -> bytes:
-    salt = os.urandom(16); key = _derive_key(secret, salt); aes = AESGCM(key); iv = os.urandom(12)
+    salt = os.urandom(16)
+    key = _derive_key(secret, salt)
+    aes = AESGCM(key)
+    iv = os.urandom(12)
     ct = aes.encrypt(iv, data, None)
-    return salt + iv + ct  # pacote
+    return salt + iv + ct  # retorna o pacote completo
 
-def decrypt_bytes(packed: bytes, secret: str) -> bytes:
-    salt, iv, ct = packed[:16], packed[16:28], packed[28:]
-    key = _derive_key(secret, salt); aes = AESGCM(key)
-    return aes.decrypt(iv, ct, None)
+# Descriptografa dados
+def decrypt_bytes(data: bytes, secret: str) -> Optional[bytes]:
+    try:
+        salt = data[:16]
+        iv = data[16:28]
+        ct = data[28:]
+        key = _derive_key(secret, salt)
+        aes = AESGCM(key)
+        return aes.decrypt(iv, ct, None)
+    except Exception as e:
+        print(f"Erro de descriptografia: {e}")
+        return None
+
+# ===== Playwright (operações de login) =====
+app = FastAPI()
+PENDING: Dict[str, str] = {} # tentativa_id -> email
 
 def session_path(user_id: str) -> Path:
     return SESS_DIR / f"{user_id}.bin"
 
-# ===== Estado de login pendente (em memória, com TTL) =====
-class Pending:
-    def __init__(self, browser, context, page, user_id):
-        self.browser = browser
-        self.context = context
-        self.page = page
-        self.user_id = user_id
-        self.created = asyncio.get_event_loop().time()
+def _is_connected(user_id: str) -> bool:
+    return session_path(user_id).exists()
 
-PENDING: Dict[str, Pending] = {}
-PENDING_TTL = 10 * 60  # 10 min
-
-async def cleanup_pending():
-    # simples coletor (chamado no fim de cada request relevante)
-    now = asyncio.get_event_loop().time()
-    stale = [k for k,v in PENDING.items() if now - v.created > PENDING_TTL]
-    for k in stale:
+async def _do_login(email: str, password: str, phone: str = ""):
+    attempt_id = str(uuid.uuid4())
+    PENDING[attempt_id] = email
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
         try:
-            await PENDING[k].browser.close()
-        except Exception:
-            pass
-        PENDING.pop(k, None)
+            ctx = await browser.new_context()
+            page = await ctx.new_page()
+            await page.goto(f"{BASE_URL}/login")
+            
+            # Preenche o formulário de login
+            await page.fill("input[name='email']", email)
+            await page.fill("input[name='password']", password)
+            if phone:
+                await page.fill("input[name='phone']", phone)
 
-# ===== FastAPI =====
-app = FastAPI()
+            # Clique no botão de login
+            await page.locator("button.login-button").click()
 
-@app.get("/", response_class=HTMLResponse)
-def home():
-    return """
-    <html><body style="font-family: Inter, Arial; color:#eee; background:#0f1115; padding:24px;">
-      <h2>Login Duoke (2 etapas)</h2>
-      <form id="f1" method="post" action="/duoke/login/start" onsubmit="event.preventDefault(); startLogin();">
-        <label>Seu UID: <input id="uid" name="user_id" required></label><br/><br/>
-        <label>Email Duoke: <input id="email" name="email" type="email" required></label><br/><br/>
-        <label>Senha Duoke: <input id="password" name="password" type="password" required></label><br/><br/>
-        <button>Iniciar login</button>
-      </form>
-      <div id="step2" style="display:none; margin-top:20px;">
-        <p>Insira o código de verificação enviado pelo Duoke:</p>
-        <input id="code" placeholder="Código">
-        <button onclick="sendCode()">Enviar código</button>
-      </div>
-      <pre id="out" style="margin-top:20px; background:#151821; padding:12px; border-radius:8px;"></pre>
-      <script>
-        let attemptId = null; let userId = null;
-        async function startLogin(){
-          const fd = new FormData();
-          userId = document.getElementById('uid').value;
-          fd.append('user_id', userId);
-          fd.append('email', document.getElementById('email').value);
-          fd.append('password', document.getElementById('password').value);
-          const rs = await fetch('/duoke/login/start', {method:'POST', body: fd});
-          const js = await rs.json();
-          document.getElementById('out').textContent = JSON.stringify(js, null, 2);
-          if(js.status === 'NEED_CODE'){ attemptId = js.attempt_id; document.getElementById('step2').style.display='block'; }
-        }
-        async function sendCode(){
-          const fd = new FormData();
-          fd.append('attempt_id', attemptId);
-          fd.append('user_id', userId);
-          fd.append('code', document.getElementById('code').value);
-          const rs = await fetch('/duoke/login/code', {method:'POST', body: fd});
-          const js = await rs.json();
-          document.getElementById('out').textContent = JSON.stringify(js, null, 2);
-        }
-      </script>
-    </body></html>
-    """
+            # Espera até que o botão de "Verificar código" apareça ou a página mude
+            await page.wait_for_selector("text=Verificar código", timeout=60000)
 
-@app.post("/duoke/login/start")
-async def duoke_login_start(user_id: str = Form(...), email: str = Form(...), password: str = Form(...)):
-    await cleanup_pending()
-    try:
-        p = await async_playwright().start()
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
-        ctx = await browser.new_context()
-        page = await ctx.new_page()
-        await page.goto("https://www.duoke.com/", wait_until="domcontentloaded")
+            return JSONResponse({
+                "ok": True,
+                "status": "OTP_SENT",
+                "msg": "Código de verificação enviado para o seu email.",
+                "attempt_id": attempt_id
+            })
+        finally:
+            await browser.close()
 
-        # Modal "Your login has expired..."
+@app.post("/duoke/login")
+async def duoke_login(req: Request):
+    data = await req.json()
+    email = data.get("email")
+    password = data.get("password")
+    phone = data.get("phone")
+    
+    if not email or not password:
+        raise HTTPException(400, "Email e senha são obrigatórios.")
+    
+    # Simulação de login, no mundo real você faria o web scraping aqui
+    return await _do_login(email, password, phone)
+
+@app.post("/duoke/verify")
+async def duoke_verify(req: Request):
+    data = await req.json()
+    code = data.get("code")
+    attempt_id = data.get("attempt_id")
+    
+    if not code or not attempt_id:
+        raise HTTPException(400, "Código de verificação e ID da tentativa são obrigatórios.")
+        
+    email = PENDING.get(attempt_id)
+    if not email:
+        raise HTTPException(404, "Tentativa de login expirada ou não encontrada.")
+        
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
         try:
-            await page.get_by_role("button", name="Confirm").click(timeout=2000)
-        except PWTimeoutError:
-            pass
+            # Reabre a página de login para verificar o código
+            ctx = await browser.new_context()
+            page = await ctx.new_page()
+            await page.goto(f"{BASE_URL}/login")
 
-        # Preenche login
-        await page.fill("input[type='email'], input[placeholder='Email']", email)
-        await page.fill("input[type='password'], input[placeholder='Password']", password)
-        await page.get_by_role("button", name="Login").click()
+            # Preenche o código OTP (seletor genérico para inputs de código/tel)
+            sel_code = "input[placeholder*='verification' i], input[type='tel']"
+            await page.fill(sel_code, code)
 
-        # 1) Tenta detectar imediatamente dashboard (não pediu código)
-        try:
-            await page.wait_for_load_state("networkidle", timeout=4000)
-            # Se carregou algo que não é login, ótimo — salva sessão e finaliza
+            # Botão para confirmar/verificar
+            try:
+                await page.get_by_role("button", name=lambda n: n and ('verify' in n.lower() or 'confirm' in n.lower() or 'submit' in n.lower() or 'login' in n.lower())).click(timeout=2000)
+            except PWTimeoutError:
+                # fallback: clique no primeiro botão
+                await page.locator("button").first.click()
+
+            # Espera o pós-login (dashboard) e salva sessão
+            await page.wait_for_load_state("networkidle", timeout=LOGIN_WAIT_TIMEOUT)
             tmp = Path("storage_state.json")
             await ctx.storage_state(path=str(tmp))
             enc = encrypt_bytes(tmp.read_bytes(), SECRET)
-            session_path(user_id).write_bytes(enc)
+            session_path(email).write_bytes(enc) # Use o email como user_id
             tmp.unlink(missing_ok=True)
-            await browser.close(); await p.stop()
-            return JSONResponse({"ok": True, "status": "LOGGED", "msg": "Sessão criada sem pedir código."})
-        except Exception:
-            pass
 
-        # 2) Detecta UI de verificação de código
-        # Seletor amplo: input para "code" e botões comuns
-        code_input = page.locator("input[name*='code' i], input[placeholder*='code' i], input[placeholder*='verification' i], input[type='tel']")
-        if await code_input.count() == 0:
-            # Algumas UIs mostram um texto; como fallback, ainda vamos esperar o input surgir
-            try:
-                await code_input.wait_for(timeout=8000)
-            except Exception:
-                # Não achou input → provavelmente login falhou por outro motivo
-                await browser.close(); await p.stop()
-                raise HTTPException(400, "Não foi possível localizar o campo de código. Verifique o login.")
-
-        # Cria tentativa pendente
-        attempt_id = uuid.uuid4().hex
-        PENDING[attempt_id] = Pending(browser, ctx, page, user_id)
-        return JSONResponse({"ok": True, "status": "NEED_CODE", "attempt_id": attempt_id, "msg": "Código de verificação necessário."})
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(400, f"Falha ao iniciar login: {e}")
-
-@app.post("/duoke/login/code")
-async def duoke_login_code(attempt_id: str = Form(...), user_id: str = Form(...), code: str = Form(...)):
-    await cleanup_pending()
-    pend = PENDING.get(attempt_id)
-    if not pend or pend.user_id != user_id:
-        raise HTTPException(404, "Tentativa não encontrada/expirada.")
-
-    page = pend.page
-    ctx = pend.context
-    browser = pend.browser
-
-    try:
-        # Preenche código (vários seletores tentativos)
-        sel_code = "input[name*='code' i], input[placeholder*='code' i], input[placeholder*='verification' i], input[type='tel']"
-        await page.fill(sel_code, code)
-
-        # Botão para confirmar/verificar
-        try:
-            await page.get_by_role("button", name=lambda n: n and ('verify' in n.lower() or 'confirm' in n.lower() or 'submit' in n.lower() or 'login' in n.lower())).click(timeout=2000)
-        except PWTimeoutError:
-            # fallback: clique no primeiro botão
-            await page.locator("button").first.click()
-
-        # Espera o pós-login (dashboard) e salva sessão
-        await page.wait_for_load_state("networkidle", timeout=LOGIN_WAIT_TIMEOUT)
-        tmp = Path("storage_state.json")
-        await ctx.storage_state(path=str(tmp))
-        enc = encrypt_bytes(tmp.read_bytes(), SECRET)
-        session_path(user_id).write_bytes(enc)
-        tmp.unlink(missing_ok=True)
-
-        # encerra e limpa pendência
-        await browser.close()
-        PENDING.pop(attempt_id, None)
-        return JSONResponse({"ok": True, "status": "LOGGED", "msg": "Sessão criada com sucesso."})
-
-    except Exception as e:
-        try:
+            # encerra e limpa pendência
             await browser.close()
-        finally:
             PENDING.pop(attempt_id, None)
-        raise HTTPException(400, f"Falha ao verificar código: {e}")
+            return JSONResponse({"ok": True, "status": "LOGGED", "msg": "Sessão criada com sucesso."})
+
+        except Exception as e:
+            try:
+                await browser.close()
+            finally:
+                PENDING.pop(attempt_id, None)
+            raise HTTPException(400, f"Falha ao verificar código: {e}")
 
 @app.get("/duoke/status")
 def duoke_status(user_id: str):
-    return {"logged": session_path(user_id).exists()}
+    return {"connected": _is_connected(user_id)}
 
 @app.post("/duoke/logout")
-def duoke_logout(user_id: str):
-    p = session_path(user_id)
-    if p.exists(): p.unlink()
-    return {"ok": True}
+async def duoke_logout(req: Request):
+    user_id = (await req.json()).get("user_id")
+    if not user_id:
+        raise HTTPException(400, "ID do usuário é obrigatório.")
+        
+    path = session_path(user_id)
+    if path.exists():
+        path.unlink()
+    return JSONResponse({"ok": True})
