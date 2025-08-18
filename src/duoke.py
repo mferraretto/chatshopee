@@ -5,7 +5,9 @@ import os
 import re
 import json
 from pathlib import Path
-from playwright.async_api import async_playwright, Error as PwError
+from typing import Optional, Tuple
+
+from playwright.async_api import async_playwright, Error as PwError, TimeoutError as PWTimeoutError
 from .config import settings
 
 # Carrega seletores configuráveis
@@ -14,12 +16,26 @@ SEL = json.loads(
     .read_text(encoding="utf-8")
 )
 
+CONFIRM_RE = re.compile(r"(confirm|ok|continue|verify|submit|login|entrar|确认|確定|确定)", re.I)
+
+def _env_or_settings(name_env: str, name_settings: str, default: str = "") -> str:
+    v = os.getenv(name_env)
+    if v:
+        return v
+    return str(getattr(settings, name_settings, default) or "")
+
 class DuokeBot:
+    """
+    Bot Duoke independente de UI. Mantém referência à página atual para o espelho,
+    faz login (com fechamento de modal), tenta detectar 2FA e expõe método para submeter o código.
+    """
     def __init__(self, storage_state_path: str = "storage_state.json"):
         # Mantido por compat
         self.storage_state_path = storage_state_path
         # Página atual (usada pelo espelho da UI)
         self.current_page = None
+        # Sinaliza quando ficou parado aguardando 2FA
+        self.awaiting_2fa = False
 
     # ---------- infra de navegador ----------
 
@@ -35,15 +51,14 @@ class DuokeBot:
         headless = os.getenv("HEADLESS", "1").lower() not in {"0", "false", "no"}
 
         ctx = await p.chromium.launch_persistent_context(
-    user_data_dir=str(user_data_dir),
-    headless=True,  # <- headless no Render
-    args=[
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-    ],
-)
-
+            user_data_dir=str(user_data_dir),
+            headless=headless,  # << corrigido: usa variável
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+            ],
+        )
         return ctx
 
     async def _get_page(self, ctx):
@@ -51,18 +66,181 @@ class DuokeBot:
         self.current_page = page
         return page
 
-    async def ensure_login(self, page):
+    # ---------- utilitários de login / 2FA ----------
+
+    async def _click_confirm_anywhere(self, page_or_frame) -> bool:
+        # por role
+        try:
+            await page_or_frame.get_by_role("button", name=CONFIRM_RE).click(timeout=1200)
+            return True
+        except PWTimeoutError:
+            pass
+        # por texto
+        for text in ["Confirm", "OK", "Continue", "Verify", "Login", "Entrar", "确认", "確定", "确定"]:
+            try:
+                await page_or_frame.locator(f"text={text}").first.click(timeout=800)
+                return True
+            except PWTimeoutError:
+                continue
+        # Enter como último recurso
+        try:
+            await page_or_frame.keyboard.press("Enter")
+            return True
+        except Exception:
+            return False
+
+    async def _try_close_modal(self, page):
+        # página principal
+        try:
+            await self._click_confirm_anywhere(page)
+        except Exception:
+            pass
+        # iframes
+        for fr in page.frames:
+            try:
+                await self._click_confirm_anywhere(fr)
+            except Exception:
+                pass
+
+    async def _find_login_frame(self, page):
+        """
+        Retorna (frame, sel_email, sel_pass). Se estiver na própria page, frame = page.
+        """
+        selectors_email = ["input[type='email']", "input[placeholder*='email' i]"]
+        selectors_pass  = ["input[type='password']", "input[placeholder*='password' i]"]
+
+        # própria página
+        for se in selectors_email:
+            if await page.locator(se).count() > 0:
+                for sp in selectors_pass:
+                    if await page.locator(sp).count() > 0:
+                        return page, se, sp
+
+        # iframes
+        for fr in page.frames:
+            try:
+                for se in selectors_email:
+                    if await fr.locator(se).count() > 0:
+                        for sp in selectors_pass:
+                            if await fr.locator(sp).count() > 0:
+                                return fr, se, sp
+            except Exception:
+                continue
+
+        return None, None, None
+
+    async def _is_logged_ui(self, page) -> bool:
+        """
+        Considera logado se achar contêiner de chat ou mensagens.
+        """
+        chat_list_container = SEL.get("chat_list_container", "")
+        chat_list_item = SEL.get("chat_list_item", "ul.chat_list li")
+        try:
+            if chat_list_container:
+                loc = page.locator(f"{chat_list_container}, {chat_list_item}, ul.message_main")
+            else:
+                loc = page.locator(f"{chat_list_item}, ul.message_main")
+            return await loc.count() > 0
+        except Exception:
+            return False
+
+    async def _detect_2fa_input(self, page):
+        sel = "input[name*='code' i], input[placeholder*='code' i], input[placeholder*='verification' i], input[type='tel']"
+        # procura na página e iframes
+        if await page.locator(sel).count() > 0:
+            return page, sel
+        for fr in page.frames:
+            try:
+                if await fr.locator(sel).count() > 0:
+                    return fr, sel
+            except Exception:
+                pass
+        return None, None
+
+    def _get_creds(self) -> Tuple[str, str]:
+        email = _env_or_settings("DUOKE_EMAIL", "duoke_email")
+        password = _env_or_settings("DUOKE_PASSWORD", "duoke_password")
+        return email, password
+
+    # ---------- login principal ----------
+
+    async def ensure_login(self, page) -> None:
+        """
+        Vai até a URL, fecha modal de sessão expirada, faz login se necessário,
+        tenta detectar 2FA. Se 2FA for solicitado, deixa self.awaiting_2fa=True
+        e retorna (sem levantar exceção) — a UI deve chamar provide_2fa_code().
+        """
         await page.goto(settings.douke_url, wait_until="domcontentloaded")
+
         # Aguarda rede “assentar”
         try:
             await page.wait_for_load_state("networkidle", timeout=30000)
         except Exception:
             pass
 
-        # Espera aparecer lista de chats OU a UL principal de mensagens
-        chat_list_container = SEL.get("chat_list_container", "")
-        chat_list_item = SEL.get("chat_list_item", "ul.chat_list li")
+        # Fecha modal “Your login has expired…”
+        await self._try_close_modal(page)
+
+        # Já está logado?
+        if await self._is_logged_ui(page):
+            self.awaiting_2fa = False
+            return
+
+        # Detecta formulário de login
+        fr, sel_email, sel_pass = await self._find_login_frame(page)
+        if fr is None:
+            # Dá mais um tempo para montar UI
+            try:
+                await page.wait_for_timeout(1000)
+            except Exception:
+                pass
+            fr, sel_email, sel_pass = await self._find_login_frame(page)
+
+        if fr is None:
+            # Pode ser que o chat não tenha renderizado ainda; não falha.
+            return
+
+        # Credenciais
+        email, password = self._get_creds()
+        if not email or not password:
+            raise RuntimeError(
+                "Credenciais Duoke ausentes. Defina DUOKE_EMAIL e DUOKE_PASSWORD (ou settings.duoke_email/duoke_password)."
+            )
+
+        # Preenche e tenta logar
+        await fr.fill(sel_email, email)
+        await fr.fill(sel_pass, password)
+
+        # Clica Login (vários nomes)
         try:
+            await fr.get_by_role("button", name=re.compile(r"(login|entrar|sign\s*in|提交|登录)", re.I)).click(timeout=2500)
+        except PWTimeoutError:
+            # fallback: primeiro botão visível
+            try:
+                await fr.locator("button").first.click()
+            except Exception:
+                pass
+
+        # Espera algo acontecer
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+
+        # Fecha modal novamente se reapareceu
+        await self._try_close_modal(page)
+
+        # 2FA?
+        fr_code, sel_code = await self._detect_2fa_input(page)
+        if fr_code and sel_code:
+            # Deixa a UI saber que precisa do código
+            self.awaiting_2fa = True
+            return
+
+        # Caso contrário, espera o chat aparecer
+        try:
+            chat_list_container = SEL.get("chat_list_container", "")
+            chat_list_item = SEL.get("chat_list_item", "ul.chat_list li")
             if chat_list_container:
                 await page.wait_for_selector(
                     f"{chat_list_container}, {chat_list_item}, ul.message_main",
@@ -74,7 +252,50 @@ class DuokeBot:
                     timeout=60000,
                 )
         except Exception:
-            print("Aviso: elementos de chat não apareceram em 60s; seguindo assim mesmo.")
+            # não quebra o fluxo, apenas segue
+            pass
+
+        self.awaiting_2fa = False
+
+    async def provide_2fa_code(self, code: str) -> bool:
+        """
+        Chame este método quando a UI receber o código 2FA do usuário.
+        Preenche e confirma; retorna True se login concluído.
+        """
+        page = self.current_page
+        if not page:
+            raise RuntimeError("Nenhuma página ativa para submeter o 2FA.")
+
+        fr_code, sel_code = await self._detect_2fa_input(page)
+        if not (fr_code and sel_code):
+            # nada para fazer
+            self.awaiting_2fa = False
+            return True
+
+        await fr_code.fill(sel_code, code)
+        # botão de confirmar/verify/submit/login
+        try:
+            await fr_code.get_by_role("button", name=CONFIRM_RE).click(timeout=2000)
+        except PWTimeoutError:
+            try:
+                await fr_code.locator("button").first.click()
+            except Exception:
+                pass
+
+        try:
+            await page.wait_for_load_state("networkidle", timeout=30000)
+        except Exception:
+            pass
+
+        # tenta fechar eventual modal remanescente
+        await self._try_close_modal(page)
+
+        # considera logado se achar chat
+        ok = await self._is_logged_ui(page)
+        self.awaiting_2fa = not ok
+        return ok
+
+    # ---------- filtros/UX ----------
 
     async def apply_needs_reply_filter(self, page):
         if not getattr(settings, "apply_needs_reply_filter", False):
@@ -300,7 +521,7 @@ class DuokeBot:
 
     # ---------- utilidades ----------
 
-    async def maybe_extract_tracking(self, page) -> str | None:
+    async def maybe_extract_tracking(self, page) -> Optional[str]:
         try:
             content = await page.content()
         except Exception:
@@ -312,6 +533,12 @@ class DuokeBot:
 
     async def _cycle(self, page, decide_reply_fn):
         """Executa um ciclo sobre as conversas visíveis."""
+        # Se estiver aguardando 2FA, não tenta responder
+        if self.awaiting_2fa:
+            print("[DEBUG] Aguardando 2FA, ciclo pausado.")
+            await asyncio.sleep(1)
+            return
+
         await self.apply_needs_reply_filter(page)
 
         conv_locator = self.conversations(page)
