@@ -151,7 +151,8 @@ HTML = Template(r"""
   </div>
 
   <script>
-    const websocket = new WebSocket(`ws://${window.location.host}/ws`);
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const websocket = new WebSocket(`${protocol}://${window.location.host}/ws`);
     const tabs = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
     const logContainer = document.getElementById('log-container');
@@ -235,14 +236,15 @@ HTML = Template(r"""
         });
         const result = await res.json();
         if (result.ok) {
-          alert('Login iniciado. Verifique seu email ou celular por um código.');
+          // Substituir alert() por um modal customizado
+          showCustomAlert('Login iniciado. Verifique seu email ou celular por um código.');
           loginForm.classList.add('hidden');
           otpForm.classList.remove('hidden');
         } else {
-          alert(`Erro: ${result.msg}`);
+          showCustomAlert(`Erro: ${result.msg}`);
         }
       } catch (err) {
-        alert('Ocorreu um erro no login. Verifique o email/senha ou tente novamente mais tarde.');
+        showCustomAlert('Ocorreu um erro no login. Verifique o email/senha ou tente novamente mais tarde.');
       }
     });
 
@@ -257,16 +259,16 @@ HTML = Template(r"""
         });
         const result = await res.json();
         if (result.ok) {
-          alert('Login bem-sucedido!');
+          showCustomAlert('Login bem-sucedido!');
           otpForm.classList.add('hidden');
           loginForm.classList.add('hidden');
           logoutButton.classList.remove('hidden');
           checkStatus();
         } else {
-          alert(`Erro: ${result.msg}`);
+          showCustomAlert(`Erro: ${result.msg}`);
         }
       } catch (err) {
-        alert('Ocorreu um erro ao verificar o código. Tente novamente.');
+        showCustomAlert('Ocorreu um erro ao verificar o código. Tente novamente.');
       }
     });
 
@@ -396,6 +398,22 @@ HTML = Template(r"""
           logoutButton.classList.add('hidden');
         }
       }
+    }
+
+    // Modal para substituir alerts
+    function showCustomAlert(message) {
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50';
+      modal.innerHTML = `
+        <div class="p-6 bg-white rounded-lg shadow-xl max-w-sm mx-auto">
+          <p class="text-lg font-bold text-gray-800 mb-4">${message}</p>
+          <button id="close-modal-btn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors duration-200">OK</button>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      document.getElementById('close-modal-btn').addEventListener('click', () => {
+        document.body.removeChild(modal);
+      });
     }
   </script>
 </body>
