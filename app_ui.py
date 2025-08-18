@@ -130,7 +130,7 @@ HTML = Template(r"""
         <form id="otp-form" class="mt-8 space-y-4 hidden">
           <div class="flex items-center">
             <label for="otp" class="w-32 font-medium text-gray-700">Código OTP:</label>
-            <input type="text" id="otp" name="otp" required class="flex-grow p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <input type="text" id="otp" name="otp" required class="flex-grow p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
           </div>
           <button type="submit" class="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors duration-200">Verificar Código</button>
         </form>
@@ -430,10 +430,14 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         CONNECTIONS.remove(websocket)
 
-# Rotas
 @app.get("/", response_class=HTMLResponse)
 async def get_ui():
     return HTMLResponse(HTML.render())
+
+# Adiciona um endpoint de health check para a plataforma Render
+@app.get("/healthz")
+async def healthz():
+    return JSONResponse({"status": "ok"})
 
 @app.post("/start")
 async def start():
