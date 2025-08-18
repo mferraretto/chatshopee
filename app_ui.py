@@ -276,7 +276,6 @@ HTML = Template(r"""
         });
         const result = await res.json();
         if (result.ok) {
-          // Substituir alert() por um modal customizado
           showCustomAlert('Login iniciado. Verifique seu email ou celular por um código.');
           loginForm.classList.add('hidden');
           otpForm.classList.remove('hidden');
@@ -291,11 +290,12 @@ HTML = Template(r"""
     otpForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const otp = document.getElementById('otp').value;
+      const attempt_id = "default_attempt"; // Placeholder for demo
       try {
         const res = await fetch('/duoke/verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: otp })
+          body: JSON.stringify({ code: otp, attempt_id })
         });
         const result = await res.json();
         if (result.ok) {
@@ -368,7 +368,7 @@ HTML = Template(r"""
         updateUI(data.snapshot);
       }
       if (data.log) {
-        logContainer.innerHTML = data.log.map(l => `<div>${l}</div>`).join('') + logContainer.innerHTML;
+        logContainer.innerHTML = data.log.map(l => '<div>' + l + '</div>').join('') + logContainer.innerHTML;
         if (logContainer.children.length > 4000) {
           while(logContainer.children.length > 3900) {
             logContainer.removeChild(logContainer.lastChild);
@@ -440,7 +440,7 @@ HTML = Template(r"""
       }
     }
 
-    # Modal para substituir alerts
+    // Modal para substituir alerts
     function showCustomAlert(message) {
       const modal = document.createElement('div');
       modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50';
@@ -497,15 +497,14 @@ async def get_ui():
 async def healthz():
     return JSONResponse({"status": "ok"})
 
-# ===== Endpoints de Login (movidos de main.py) =====
+# ===== Endpoints de Login (movidos de main.py e atualizados para JSON) =====
 @app.post("/duoke/login")
-async def duoke_login(
-    email: str = Form(None),
-    password: str = Form(None),
-    phone: str = Form(None),
-    user_id: str = "default_user", # Apenas para o ambiente de dev
-):
+async def duoke_login(req: Request, user_id: str = "default_user"):
     global PENDING
+    data = await req.json()
+    email = data.get("email")
+    password = data.get("password")
+    phone = data.get("phone")
 
     if not email or not password:
         raise HTTPException(400, "Email e senha são obrigatórios.")
@@ -515,8 +514,9 @@ async def duoke_login(
 
     async def _do_login():
         nonlocal attempt_id
-        try:
-            async with async_playwright() as p:
+        async with async_playwright() as p:
+            browser = None
+            try:
                 browser = await p.chromium.launch(headless=True)
                 ctx = await browser.new_context()
                 page = await ctx.new_page()
@@ -524,57 +524,47 @@ async def duoke_login(
                 log(f"[Playwright] Navegando para a página de login para o usuário {user_id}...")
                 await page.goto("https://www.duoke.com/login")
                 
-                # Preenche credenciais
                 await page.fill("input[name='email']", email)
                 await page.fill("input[name='password']", password)
                 
-                # Se telefone, preenche e clica no botão de enviar código via SMS
                 if phone:
                     await page.fill("input[placeholder='Telefone']", phone)
                     await page.get_by_role("button", name="Send SMS").click()
                 else:
                     await page.get_by_role("button", name="Login").click()
 
-                # Espera a página do código OTP ou o dashboard
                 await page.wait_for_url(lambda url: "verify" in url or "dashboard" in url, timeout=LOGIN_WAIT_TIMEOUT)
 
                 if "dashboard" in page.url:
-                    # Login direto, sem OTP
                     log(f"[Playwright] Login bem-sucedido para {user_id}. Salvando sessão.")
                     await ctx.storage_state(path=session_path(user_id))
-                    # Limpa a pendência
                     PENDING.pop(attempt_id, None)
                     return JSONResponse({"ok": True, "status": "LOGGED", "msg": "Sessão criada com sucesso."})
 
                 elif "verify" in page.url:
-                    # Precisa de OTP
                     log(f"[Playwright] OTP necessário para {user_id}. Aguardando verificação.")
-                    PENDING[attempt_id]["ctx"] = ctx  # Salva o contexto para o passo de verificação
+                    PENDING[attempt_id]["ctx"] = ctx
                     return JSONResponse({"ok": True, "status": "OTP_REQUIRED", "attempt_id": attempt_id, "msg": "Código OTP necessário."})
-
                 else:
-                    # Erro genérico de login
                     raise Exception("Falha desconhecida no login.")
-
-        except Exception as e:
-            raise HTTPException(400, f"Falha no login: {e}")
-        finally:
-            if 'browser' in locals() and browser.is_connected():
-                await browser.close()
-            PENDING.pop(attempt_id, None)
+            except Exception as e:
+                if browser and browser.is_connected():
+                    await browser.close()
+                PENDING.pop(attempt_id, None)
+                raise HTTPException(400, f"Falha no login: {e}")
 
     return await _do_login()
 
 @app.post("/duoke/verify")
-async def duoke_verify(
-    code: str = Form(None),
-    attempt_id: str = Form(None)
-):
+async def duoke_verify(req: Request):
     global PENDING
+    data = await req.json()
+    code = data.get("code")
+    attempt_id = data.get("attempt_id")
+
     if not code or not attempt_id or attempt_id not in PENDING:
         raise HTTPException(400, "Código inválido ou tentativa de login expirada.")
     
-    # Busca a sessão pendente
     pending_data = PENDING[attempt_id]
     ctx = pending_data.get("ctx")
     user_id = pending_data.get("user_id")
@@ -585,14 +575,15 @@ async def duoke_verify(
     try:
         page = await ctx.new_page()
 
-        # Preenche o código e clica para verificar
         sel_code = "input[placeholder*='verification' i], input[type='tel']"
         await page.fill(sel_code, code)
-        await page.get_by_role("button", name="Verify").click()
+        
+        try:
+            await page.get_by_role("button", name=lambda n: n and ('verify' in n.lower() or 'confirm' in n.lower() or 'submit' in n.lower() or 'login' in n.lower())).click(timeout=2000)
+        except PWTimeoutError:
+            await page.locator("button").first.click()
 
-        # Espera o dashboard e salva a sessão
-        await page.wait_for_url("**/dashboard", timeout=LOGIN_WAIT_TIMEOUT)
-        log(f"[Playwright] Verificação bem-sucedida para {user_id}. Salvando sessão.")
+        await page.wait_for_load_state("networkidle", timeout=LOGIN_WAIT_TIMEOUT)
         
         tmp = Path("storage_state.json")
         await ctx.storage_state(path=str(tmp))
@@ -600,7 +591,6 @@ async def duoke_verify(
         session_path(user_id).write_bytes(enc)
         tmp.unlink(missing_ok=True)
         
-        # Encerra e limpa pendência
         await ctx.close()
         PENDING.pop(attempt_id, None)
         return JSONResponse({"ok": True, "status": "LOGGED", "msg": "Sessão criada com sucesso."})
@@ -612,6 +602,7 @@ async def duoke_verify(
             PENDING.pop(attempt_id, None)
         raise HTTPException(400, f"Falha ao verificar código: {e}")
 
+
 @app.post("/start")
 async def start():
     global _task, _bot, RUNNING, LAST_ERR
@@ -622,7 +613,6 @@ async def start():
         return RedirectResponse("/", status_code=303)
     ws_broadcast({"snapshot": {"running": True}})
     
-    # Inicia o bot
     try:
         _bot = DuokeBot(STATE_PATH)
         await _bot.start()
@@ -638,7 +628,6 @@ async def start():
         ws_broadcast({"snapshot": {"running": False, "last_error": LAST_ERR}})
         return RedirectResponse("/", status_code=303)
     
-    # Inicia a tarefa de monitoramento
     RUNNING = True
     _task = asyncio.create_task(_run_cycle())
     
@@ -656,12 +645,10 @@ async def _run_cycle():
                 break
             
             try:
-                # 1. Checa por novas mensagens
                 new_requests = await _bot.check_new_messages()
                 if new_requests:
                     log(f"[BOT] Encontrado {len(new_requests)} novas solicitações.")
                     for req in new_requests:
-                        # 2. Classifica a intenção e busca a resposta
                         reply = decide_reply(req.text)
                         
                         if reply["action"] == "reply":
@@ -671,12 +658,10 @@ async def _run_cycle():
                             log(f"[BOT] Pulando solicitação '{reply['id']}'.")
                             await _bot.skip_ticket(req.page)
                             
-                        # Dá um tempo para evitar sobrecarregar
                         await asyncio.sleep(1)
             except Exception as e:
                 log(f"[BOT] Erro durante o ciclo: {type(e).__name__}: {e}")
                 LAST_ERR = str(e)
-                # Tenta fechar e reabrir o bot se for um erro crítico
                 if not isinstance(e, asyncio.CancelledError):
                     log("[BOT] Tentando reiniciar o bot...")
                     if _bot:
@@ -689,7 +674,6 @@ async def _run_cycle():
                         RUNNING = False
                         break
             
-            # Pequeno intervalo antes do próximo ciclo
             await asyncio.sleep(5)
             
     except asyncio.CancelledError:
@@ -762,4 +746,3 @@ async def post_rules(req: Request):
         return JSONResponse({"ok": True})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao salvar regras: {e}")
-
