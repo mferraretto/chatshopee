@@ -522,7 +522,7 @@ async def duoke_login(req: Request, user_id: str = "default_user"):
                 page = await ctx.new_page()
 
                 log(f"[Playwright] Navegando para a página de login para o usuário {user_id}...")
-                await page.goto("https://www.duoke.com/login")
+                await page.goto("https://web.duoke.com/?lang=en#/dk/login")
                 
                 await page.fill("input[name='email']", email)
                 await page.fill("input[name='password']", password)
