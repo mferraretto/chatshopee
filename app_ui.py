@@ -8,7 +8,7 @@ if sys.platform.startswith("win"):
         pass
 # ----------------------------------------------------------------------
 
-import base64, json, time, os
+import os, json, base64, uuid, time
 from pathlib import Path
 from typing import Optional, Set, Dict
 from collections import deque
@@ -17,11 +17,51 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTP
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Template
+from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from src.duoke import DuokeBot
 from src.config import settings
 from src.classifier import decide_reply
 from src.rules import load_rules, save_rules
+
+# ===== Configuração para o login do Duoke =====
+# Diretório para salvar sessões criptografadas
+SESS_DIR = Path("sessions")
+SESS_DIR.mkdir(exist_ok=True)
+# A chave secreta deve ser definida na variável de ambiente do Render para produção
+SECRET = os.getenv("SESSION_ENC_SECRET", "troque-isto-no-render").encode("utf-8")
+LOGIN_WAIT_TIMEOUT = 180000  # ms (3 min) para esperar dashboard após verificar código
+
+# Mapeamento temporário para tentativas de login
+PENDING: Dict[str, Dict] = {}
+
+# ===== Funções de criptografia (movidas de main.py) =====
+def _derive_key(secret: bytes, salt: bytes) -> bytes:
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100_000)
+    return kdf.derive(secret)
+
+def encrypt_bytes(data: bytes, secret: bytes) -> bytes:
+    salt = os.urandom(16)
+    key = _derive_key(secret, salt)
+    aes = AESGCM(key)
+    iv = os.urandom(12)
+    ct = aes.encrypt(iv, data, None)
+    return salt + iv + ct
+
+def decrypt_bytes(encrypted_data: bytes, secret: bytes) -> bytes:
+    salt = encrypted_data[:16]
+    iv = encrypted_data[16:28]
+    ct = encrypted_data[28:]
+    key = _derive_key(secret, salt)
+    aes = AESGCM(key)
+    return aes.decrypt(iv, ct, None)
+
+def session_path(user_id: str) -> Path:
+    """Retorna o caminho do arquivo de sessão para um dado user_id."""
+    return SESS_DIR / f"{user_id}.session"
 
 # ===== Estado global simples =====
 RUNNING: bool = False
@@ -400,7 +440,7 @@ HTML = Template(r"""
       }
     }
 
-    // Modal para substituir alerts
+    # Modal para substituir alerts
     function showCustomAlert(message) {
       const modal = document.createElement('div');
       modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50';
@@ -456,6 +496,121 @@ async def get_ui():
 @app.get("/healthz")
 async def healthz():
     return JSONResponse({"status": "ok"})
+
+# ===== Endpoints de Login (movidos de main.py) =====
+@app.post("/duoke/login")
+async def duoke_login(
+    email: str = Form(None),
+    password: str = Form(None),
+    phone: str = Form(None),
+    user_id: str = "default_user", # Apenas para o ambiente de dev
+):
+    global PENDING
+
+    if not email or not password:
+        raise HTTPException(400, "Email e senha são obrigatórios.")
+
+    attempt_id = str(uuid.uuid4())
+    PENDING[attempt_id] = {"ts": time.time(), "user_id": user_id}
+
+    async def _do_login():
+        nonlocal attempt_id
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                ctx = await browser.new_context()
+                page = await ctx.new_page()
+
+                log(f"[Playwright] Navegando para a página de login para o usuário {user_id}...")
+                await page.goto("https://www.duoke.com/login")
+                
+                # Preenche credenciais
+                await page.fill("input[name='email']", email)
+                await page.fill("input[name='password']", password)
+                
+                # Se telefone, preenche e clica no botão de enviar código via SMS
+                if phone:
+                    await page.fill("input[placeholder='Telefone']", phone)
+                    await page.get_by_role("button", name="Send SMS").click()
+                else:
+                    await page.get_by_role("button", name="Login").click()
+
+                # Espera a página do código OTP ou o dashboard
+                await page.wait_for_url(lambda url: "verify" in url or "dashboard" in url, timeout=LOGIN_WAIT_TIMEOUT)
+
+                if "dashboard" in page.url:
+                    # Login direto, sem OTP
+                    log(f"[Playwright] Login bem-sucedido para {user_id}. Salvando sessão.")
+                    await ctx.storage_state(path=session_path(user_id))
+                    # Limpa a pendência
+                    PENDING.pop(attempt_id, None)
+                    return JSONResponse({"ok": True, "status": "LOGGED", "msg": "Sessão criada com sucesso."})
+
+                elif "verify" in page.url:
+                    # Precisa de OTP
+                    log(f"[Playwright] OTP necessário para {user_id}. Aguardando verificação.")
+                    PENDING[attempt_id]["ctx"] = ctx  # Salva o contexto para o passo de verificação
+                    return JSONResponse({"ok": True, "status": "OTP_REQUIRED", "attempt_id": attempt_id, "msg": "Código OTP necessário."})
+
+                else:
+                    # Erro genérico de login
+                    raise Exception("Falha desconhecida no login.")
+
+        except Exception as e:
+            raise HTTPException(400, f"Falha no login: {e}")
+        finally:
+            if 'browser' in locals() and browser.is_connected():
+                await browser.close()
+            PENDING.pop(attempt_id, None)
+
+    return await _do_login()
+
+@app.post("/duoke/verify")
+async def duoke_verify(
+    code: str = Form(None),
+    attempt_id: str = Form(None)
+):
+    global PENDING
+    if not code or not attempt_id or attempt_id not in PENDING:
+        raise HTTPException(400, "Código inválido ou tentativa de login expirada.")
+    
+    # Busca a sessão pendente
+    pending_data = PENDING[attempt_id]
+    ctx = pending_data.get("ctx")
+    user_id = pending_data.get("user_id")
+
+    if not ctx:
+        raise HTTPException(400, "Contexto de verificação não encontrado.")
+    
+    try:
+        page = await ctx.new_page()
+
+        # Preenche o código e clica para verificar
+        sel_code = "input[placeholder*='verification' i], input[type='tel']"
+        await page.fill(sel_code, code)
+        await page.get_by_role("button", name="Verify").click()
+
+        # Espera o dashboard e salva a sessão
+        await page.wait_for_url("**/dashboard", timeout=LOGIN_WAIT_TIMEOUT)
+        log(f"[Playwright] Verificação bem-sucedida para {user_id}. Salvando sessão.")
+        
+        tmp = Path("storage_state.json")
+        await ctx.storage_state(path=str(tmp))
+        enc = encrypt_bytes(tmp.read_bytes(), SECRET)
+        session_path(user_id).write_bytes(enc)
+        tmp.unlink(missing_ok=True)
+        
+        # Encerra e limpa pendência
+        await ctx.close()
+        PENDING.pop(attempt_id, None)
+        return JSONResponse({"ok": True, "status": "LOGGED", "msg": "Sessão criada com sucesso."})
+
+    except Exception as e:
+        try:
+            await ctx.close()
+        finally:
+            PENDING.pop(attempt_id, None)
+        raise HTTPException(400, f"Falha ao verificar código: {e}")
 
 @app.post("/start")
 async def start():
