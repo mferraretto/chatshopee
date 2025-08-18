@@ -7,7 +7,6 @@ load_dotenv()
 class Settings(BaseModel):
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     douke_url: str = os.getenv("DOUKE_URL", "https://web.duoke.com/?lang=en#/dk/main/chat")
-    nav_timeout_ms: int = int(os.getenv("NAV_TIMEOUT_MS", "60000"))
     max_conversations: int = int(os.getenv("MAX_CONVERSATIONS", "50"))
     history_depth: int = int(os.getenv("HISTORY_DEPTH", "8"))
     apply_needs_reply_filter: bool = os.getenv("APPLY_NEEDS_REPLY_FILTER", "nao").lower() in ("sim","yes","true","1")

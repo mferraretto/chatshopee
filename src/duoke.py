@@ -18,22 +18,11 @@ SEL = json.loads(
 
 CONFIRM_RE = re.compile(r"(confirm|ok|continue|verify|submit|login|entrar|确认|確定|确定)", re.I)
 
-# -------- helpers de configuração --------
 def _env_or_settings(name_env: str, name_settings: str, default: str = "") -> str:
     v = os.getenv(name_env)
     if v:
         return v
     return str(getattr(settings, name_settings, default) or "")
-
-def _int_setting(name: str, default: int) -> int:
-    try:
-        v = int(getattr(settings, name, default) or default)
-        return v
-    except Exception:
-        return default
-
-DEFAULT_NAV_TIMEOUT = _int_setting("nav_timeout_ms", 90_000)   # ↑ de 60s para 90s
-DEFAULT_ACTION_DELAY = float(getattr(settings, "delay_between_actions", 1.0) or 1.0)
 
 class DuokeBot:
     """
@@ -63,7 +52,7 @@ class DuokeBot:
 
         ctx = await p.chromium.launch_persistent_context(
             user_data_dir=str(user_data_dir),
-            headless=headless,
+            headless=headless,  # << corrigido: usa variável
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
@@ -74,40 +63,15 @@ class DuokeBot:
 
     async def _get_page(self, ctx):
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        # timeouts mais relaxados
-        try:
-            page.set_default_timeout(DEFAULT_NAV_TIMEOUT)
-            page.set_default_navigation_timeout(DEFAULT_NAV_TIMEOUT)
-        except Exception:
-            pass
         self.current_page = page
         return page
-
-    async def _goto_with_retry(self, page, url: str, attempts: int = 3):
-        """
-        Duoke às vezes demora a responder; tenta navegar algumas vezes
-        com pequenos backoffs.
-        """
-        last_err = None
-        for i in range(attempts):
-            try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=DEFAULT_NAV_TIMEOUT)
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=20_000)
-                except PWTimeoutError:
-                    pass
-                return
-            except Exception as e:
-                last_err = e
-                await asyncio.sleep(2 + (i * 2))
-        raise last_err
 
     # ---------- utilitários de login / 2FA ----------
 
     async def _click_confirm_anywhere(self, page_or_frame) -> bool:
         # por role
         try:
-            await page_or_frame.get_by_role("button", name=CONFIRM_RE).click(timeout=1500)
+            await page_or_frame.get_by_role("button", name=CONFIRM_RE).click(timeout=1200)
             return True
         except PWTimeoutError:
             pass
@@ -193,15 +157,6 @@ class DuokeBot:
                 pass
         return None, None
 
-    async def _click_remember_me_if_exists(self, target):
-        try:
-            # tenta por label/checkbox
-            maybe = target.get_by_text(re.compile(r"remember\s*me", re.I))
-            if await maybe.count() > 0 and await maybe.first.is_visible():
-                await maybe.first.click()
-        except Exception:
-            pass
-
     def _get_creds(self) -> Tuple[str, str]:
         email = _env_or_settings("DUOKE_EMAIL", "duoke_email")
         password = _env_or_settings("DUOKE_PASSWORD", "duoke_password")
@@ -212,14 +167,14 @@ class DuokeBot:
     async def ensure_login(self, page) -> None:
         """
         Vai até a URL, fecha modal de sessão expirada, faz login se necessário,
-        tenta detectar 2FA. Se 2FA for solicitado, deixa self.awaiting_2fa=True.
+        tenta detectar 2FA. Se 2FA for solicitado, deixa self.awaiting_2fa=True
+        e retorna (sem levantar exceção) — a UI deve chamar provide_2fa_code().
         """
-        url = getattr(settings, "douke_url", "https://www.duoke.com/")
-        await self._goto_with_retry(page, url)
+        await page.goto(settings.douke_url, wait_until="domcontentloaded")
 
         # Aguarda rede “assentar”
         try:
-            await page.wait_for_load_state("networkidle", timeout=DEFAULT_NAV_TIMEOUT)
+            await page.wait_for_load_state("networkidle", timeout=30000)
         except Exception:
             pass
 
@@ -236,7 +191,7 @@ class DuokeBot:
         if fr is None:
             # Dá mais um tempo para montar UI
             try:
-                await page.wait_for_timeout(1200)
+                await page.wait_for_timeout(1000)
             except Exception:
                 pass
             fr, sel_email, sel_pass = await self._find_login_frame(page)
@@ -255,11 +210,10 @@ class DuokeBot:
         # Preenche e tenta logar
         await fr.fill(sel_email, email)
         await fr.fill(sel_pass, password)
-        await self._click_remember_me_if_exists(fr)
 
         # Clica Login (vários nomes)
         try:
-            await fr.get_by_role("button", name=re.compile(r"(login|entrar|sign\s*in|提交|登录)", re.I)).click(timeout=3_000)
+            await fr.get_by_role("button", name=re.compile(r"(login|entrar|sign\s*in|提交|登录)", re.I)).click(timeout=2500)
         except PWTimeoutError:
             # fallback: primeiro botão visível
             try:
@@ -269,7 +223,7 @@ class DuokeBot:
 
         # Espera algo acontecer
         try:
-            await page.wait_for_load_state("networkidle", timeout=DEFAULT_NAV_TIMEOUT)
+            await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
 
@@ -279,6 +233,7 @@ class DuokeBot:
         # 2FA?
         fr_code, sel_code = await self._detect_2fa_input(page)
         if fr_code and sel_code:
+            # Deixa a UI saber que precisa do código
             self.awaiting_2fa = True
             return
 
@@ -289,12 +244,12 @@ class DuokeBot:
             if chat_list_container:
                 await page.wait_for_selector(
                     f"{chat_list_container}, {chat_list_item}, ul.message_main",
-                    timeout=DEFAULT_NAV_TIMEOUT,
+                    timeout=60000,
                 )
             else:
                 await page.wait_for_selector(
                     f"{chat_list_item}, ul.message_main",
-                    timeout=DEFAULT_NAV_TIMEOUT,
+                    timeout=60000,
                 )
         except Exception:
             # não quebra o fluxo, apenas segue
@@ -320,7 +275,7 @@ class DuokeBot:
         await fr_code.fill(sel_code, code)
         # botão de confirmar/verify/submit/login
         try:
-            await fr_code.get_by_role("button", name=CONFIRM_RE).click(timeout=2_000)
+            await fr_code.get_by_role("button", name=CONFIRM_RE).click(timeout=2000)
         except PWTimeoutError:
             try:
                 await fr_code.locator("button").first.click()
@@ -328,7 +283,7 @@ class DuokeBot:
                 pass
 
         try:
-            await page.wait_for_load_state("networkidle", timeout=DEFAULT_NAV_TIMEOUT)
+            await page.wait_for_load_state("networkidle", timeout=30000)
         except Exception:
             pass
 
@@ -363,7 +318,6 @@ class DuokeBot:
 
     async def open_conversation_by_index(self, page, idx: int) -> bool:
         conv_locator = self.conversations(page)
-        await page.wait_for_timeout(300)
         total = await conv_locator.count()
         if idx >= total:
             return False
@@ -373,24 +327,24 @@ class DuokeBot:
         # Aguarda painel renderizar
         try:
             if SEL.get("message_container"):
-                await page.wait_for_selector(SEL["message_container"], timeout=15_000)
+                await page.wait_for_selector(SEL["message_container"], timeout=15000)
             await page.wait_for_function(
                 """() => {
                     const ul = document.querySelector('ul.message_main');
                     return ul && ul.children && ul.children.length > 0;
                 }""",
-                timeout=15_000
+                timeout=15000
             )
         except Exception:
             pass
 
         try:
             if SEL.get("input_textarea"):
-                await page.wait_for_selector(SEL["input_textarea"], timeout=8_000)
+                await page.wait_for_selector(SEL["input_textarea"], timeout=8000)
         except Exception:
             pass
 
-        await page.wait_for_timeout(int(DEFAULT_ACTION_DELAY * 1000))
+        await page.wait_for_timeout(int(getattr(settings, "delay_between_actions", 1.0) * 1000))
         return True
 
     # ---------- leitura de mensagens ----------
@@ -532,7 +486,7 @@ class DuokeBot:
         for sel in candidates:
             loc = page.locator(sel).first
             try:
-                await loc.wait_for(state="visible", timeout=5_000)
+                await loc.wait_for(state="visible", timeout=5000)
                 if await loc.is_enabled():
                     box = loc
                     break
@@ -544,7 +498,7 @@ class DuokeBot:
                 box = page.get_by_placeholder(
                     re.compile(r"Type a message here|press Enter to send|Enter to send", re.I)
                 ).first
-                await box.wait_for(state="visible", timeout=3_000)
+                await box.wait_for(state="visible", timeout=3000)
             except Exception:
                 raise RuntimeError("Campo de mensagem não encontrado (todos candidatos estavam ocultos).")
 
@@ -658,7 +612,7 @@ class DuokeBot:
                 )
 
             await self.send_reply(page, reply)
-            await page.wait_for_timeout(int(DEFAULT_ACTION_DELAY * 1000))
+            await page.wait_for_timeout(int(getattr(settings, "delay_between_actions", 1.0) * 1000))
 
     async def run_once(self, decide_reply_fn):
         """Modo pontual (mantido por compat)."""
