@@ -170,11 +170,16 @@ class DuokeBot:
         tenta detectar 2FA. Se 2FA for solicitado, deixa self.awaiting_2fa=True
         e retorna (sem levantar exceção) — a UI deve chamar provide_2fa_code().
         """
-        await page.goto(settings.douke_url, wait_until="domcontentloaded")
+        nav_timeout = getattr(settings, "nav_timeout_ms", 60000)
+        await page.goto(
+            settings.douke_url,
+            wait_until="domcontentloaded",
+            timeout=nav_timeout,
+        )
 
         # Aguarda rede “assentar”
         try:
-            await page.wait_for_load_state("networkidle", timeout=30000)
+            await page.wait_for_load_state("networkidle", timeout=nav_timeout)
         except Exception:
             pass
 
@@ -223,7 +228,7 @@ class DuokeBot:
 
         # Espera algo acontecer
         try:
-            await page.wait_for_load_state("networkidle", timeout=15000)
+            await page.wait_for_load_state("networkidle", timeout=nav_timeout)
         except Exception:
             pass
 
@@ -244,12 +249,12 @@ class DuokeBot:
             if chat_list_container:
                 await page.wait_for_selector(
                     f"{chat_list_container}, {chat_list_item}, ul.message_main",
-                    timeout=60000,
+                    timeout=nav_timeout,
                 )
             else:
                 await page.wait_for_selector(
                     f"{chat_list_item}, ul.message_main",
-                    timeout=60000,
+                    timeout=nav_timeout,
                 )
         except Exception:
             # não quebra o fluxo, apenas segue
@@ -265,6 +270,7 @@ class DuokeBot:
         page = self.current_page
         if not page:
             raise RuntimeError("Nenhuma página ativa para submeter o 2FA.")
+        nav_timeout = getattr(settings, "nav_timeout_ms", 60000)
 
         fr_code, sel_code = await self._detect_2fa_input(page)
         if not (fr_code and sel_code):
@@ -283,7 +289,7 @@ class DuokeBot:
                 pass
 
         try:
-            await page.wait_for_load_state("networkidle", timeout=30000)
+            await page.wait_for_load_state("networkidle", timeout=nav_timeout)
         except Exception:
             pass
 
