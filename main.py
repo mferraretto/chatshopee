@@ -6,30 +6,32 @@ import asyncio
 from pathlib import Path
 from typing import Dict, Optional
 
-# Importações do FastAPI
+# Importações do FastAPI para criar o servidor web e definir as rotas
 from fastapi import FastAPI, HTTPException, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-# Importações do Playwright
+# Importações do Playwright para automatizar o navegador
 from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
 
-# Importações de Criptografia
+# Importações de Criptografia para garantir a segurança da sessão
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-# ===== Config =====
-SESS_DIR = Path("sessions")
+# ===== Configurações da Aplicação =====
+SESS_DIR = Path("sessions") # Diretório para armazenar os arquivos de sessão
 SESS_DIR.mkdir(exist_ok=True)
-SECRET = os.getenv("SESSION_ENC_SECRET", "troque-isto-no-render")
-LOGIN_WAIT_TIMEOUT = 180000
+SECRET = os.getenv("SESSION_ENC_SECRET", "troque-isto-no-render") # Chave secreta para criptografia
+LOGIN_WAIT_TIMEOUT = 180000 # Tempo máximo de espera para o login (em ms)
 
-# ===== Cripto AES-GCM com PBKDF2 (igual ao seu padrão) =====
+# ===== Funções de Criptografia para salvar a sessão do Playwright de forma segura =====
 def _derive_key(secret: str, salt: bytes) -> bytes:
+    """Deriva uma chave segura a partir de uma senha e um sal usando PBKDF2."""
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100_000)
     return kdf.derive(secret.encode("utf-8"))
 
 def encrypt_bytes(data: bytes, secret: str) -> bytes:
+    """Criptografa dados usando AES-GCM. Retorna o sal, IV e o texto cifrado."""
     salt = os.urandom(16)
     key = _derive_key(secret, salt)
     aes = AESGCM(key)
@@ -38,16 +40,20 @@ def encrypt_bytes(data: bytes, secret: str) -> bytes:
     return salt + iv + ct
 
 def decrypt_bytes(packed: bytes, secret: str) -> bytes:
+    """Descriptografa dados empacotados pelo `encrypt_bytes`."""
     salt, iv, ct = packed[:16], packed[16:28], packed[28:]
     key = _derive_key(secret, salt)
     aes = AESGCM(key)
     return aes.decrypt(iv, ct, None)
 
 def session_path(user_id: str) -> Path:
+    """Gera o caminho do arquivo de sessão para um dado user_id."""
     return SESS_DIR / f"{user_id}.bin"
 
 # ===== Estado de login pendente (em memória, com TTL) =====
+# Isso é usado para manter o estado entre as duas requisições (iniciar e enviar código)
 class Pending:
+    """Classe para armazenar o estado de uma tentativa de login pendente."""
     def __init__(self, browser, context, page, user_id):
         self.browser = browser
         self.context = context
@@ -55,11 +61,11 @@ class Pending:
         self.user_id = user_id
         self.created = asyncio.get_event_loop().time()
 
-PENDING: Dict[str, Pending] = {}
-PENDING_TTL = 10 * 60  # 10 min
+PENDING: Dict[str, Pending] = {} # Dicionário para armazenar as tentativas pendentes
+PENDING_TTL = 10 * 60  # Tempo de vida da tentativa pendente: 10 minutos
 
 async def cleanup_pending():
-    # Coletor simples (chamado no fim de cada request relevante)
+    """Remove tentativas de login pendentes que expiraram."""
     now = asyncio.get_event_loop().time()
     stale = [k for k, v in PENDING.items() if now - v.created > PENDING_TTL]
     for k in stale:
@@ -69,14 +75,15 @@ async def cleanup_pending():
             pass
         PENDING.pop(k, None)
 
-# ===== FastAPI =====
+# ===== Definição da API FastAPI =====
 app = FastAPI()
 
-# Rota para health check, necessária para plataformas como o Render
+# Rota de health check. Usada por plataformas de deploy (como o Render) para verificar se a app está rodando.
 @app.get("/healthz")
 async def health_check():
     return {"status": "ok"}
 
+# Rota principal que serve a página HTML de login.
 @app.get("/", response_class=HTMLResponse)
 def home():
     return """
@@ -120,37 +127,39 @@ def home():
     </body></html>
     """
 
+# Rota para iniciar o processo de login
 @app.post("/duoke/login/start")
 async def duoke_login_start(user_id: str = Form(...), email: str = Form(...), password: str = Form(...)):
-    await cleanup_pending()
+    await cleanup_pending() # Limpa tentativas expiradas antes de começar
     p = None
     browser = None
     try:
-        # AQUI FOI FEITA A ALTERAÇÃO: adicionando os argumentos para o Playwright
+        # Inicia o Playwright
         p = await async_playwright().start()
+        # Lança o navegador Chromium em modo headless
         browser = await p.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
         ctx = await browser.new_context()
         page = await ctx.new_page()
+        # Navega para a página de login
         await page.goto("https://www.duoke.com/", wait_until="domcontentloaded")
 
-        # Modal "Your login has expired..."
+        # Tenta fechar o modal "Your login has expired..." se ele aparecer
         try:
             await page.get_by_role("button", name="Confirm").click(timeout=2000)
         except PWTimeoutError:
             pass
 
-        # Preenche login
+        # Preenche o formulário de login com as informações fornecidas
         await page.fill("input[type='email'], input[placeholder='Email']", email)
         await page.fill("input[type='password'], input[placeholder='Password']", password)
         await page.get_by_role("button", name="Login").click()
 
-        # 1) Tenta detectar imediatamente dashboard (não pediu código)
+        # Tenta detectar o dashboard imediatamente (se o 2FA não for necessário)
         try:
             await page.wait_for_load_state("networkidle", timeout=4000)
-            # Se carregou algo que não é login, ótimo — salva sessão e finaliza
             tmp = Path("storage_state.json")
             await ctx.storage_state(path=str(tmp))
             enc = encrypt_bytes(tmp.read_bytes(), SECRET)
@@ -160,18 +169,16 @@ async def duoke_login_start(user_id: str = Form(...), email: str = Form(...), pa
         except Exception:
             pass
 
-        # 2) Detecta UI de verificação de código
-        # Seletor amplo: input para "code" e botões comuns
+        # Se não foi para o dashboard, tenta detectar a UI de verificação de código
         code_input = page.locator("input[name*='code' i], input[placeholder*='code' i], input[placeholder*='verification' i], input[type='tel']")
         if await code_input.count() == 0:
-            # Algumas UIs mostram um texto; como fallback, ainda vamos esperar o input surgir
             try:
                 await code_input.wait_for(timeout=8000)
             except Exception:
-                # Não achou input → provavelmente login falhou por outro motivo
+                # Se não encontrar o campo de código, assume que o login falhou por outro motivo
                 raise HTTPException(400, "Não foi possível localizar o campo de código. Verifique o login.")
 
-        # Cria tentativa pendente
+        # Cria uma tentativa pendente para o segundo passo (código)
         attempt_id = uuid.uuid4().hex
         PENDING[attempt_id] = Pending(browser, ctx, page, user_id)
         return JSONResponse({"ok": True, "status": "NEED_CODE", "attempt_id": attempt_id, "msg": "Código de verificação necessário."})
@@ -184,6 +191,7 @@ async def duoke_login_start(user_id: str = Form(...), email: str = Form(...), pa
         if p and not browser:
             await p.stop()
 
+# Rota para enviar o código de verificação
 @app.post("/duoke/login/code")
 async def duoke_login_code(attempt_id: str = Form(...), user_id: str = Form(...), code: str = Form(...)):
     await cleanup_pending()
@@ -196,18 +204,17 @@ async def duoke_login_code(attempt_id: str = Form(...), user_id: str = Form(...)
     browser = pend.browser
 
     try:
-        # Preenche código (vários seletores tentativos)
+        # Preenche o campo do código de verificação
         sel_code = "input[name*='code' i], input[placeholder*='code' i], input[placeholder*='verification' i], input[type='tel']"
         await page.fill(sel_code, code)
 
-        # Botão para confirmar/verificar
+        # Clica no botão para confirmar/verificar
         try:
             await page.get_by_role("button", name=lambda n: n and ('verify' in n.lower() or 'confirm' in n.lower() or 'submit' in n.lower() or 'login' in n.lower())).click(timeout=2000)
         except PWTimeoutError:
-            # fallback: clique no primeiro botão
             await page.locator("button").first.click()
 
-        # Espera o pós-login (dashboard) e salva sessão
+        # Espera o dashboard carregar e salva a sessão
         await page.wait_for_load_state("networkidle", timeout=LOGIN_WAIT_TIMEOUT)
         tmp = Path("storage_state.json")
         await ctx.storage_state(path=str(tmp))
@@ -215,7 +222,7 @@ async def duoke_login_code(attempt_id: str = Form(...), user_id: str = Form(...)
         session_path(user_id).write_bytes(enc)
         tmp.unlink(missing_ok=True)
 
-        # encerra e limpa pendência
+        # Encerra o navegador e remove a tentativa pendente
         await browser.close()
         PENDING.pop(attempt_id, None)
         return JSONResponse({"ok": True, "status": "LOGGED", "msg": "Sessão criada com sucesso."})
@@ -227,10 +234,12 @@ async def duoke_login_code(attempt_id: str = Form(...), user_id: str = Form(...)
             PENDING.pop(attempt_id, None)
         raise HTTPException(400, f"Falha ao verificar código: {e}")
 
+# Rota para verificar o status da sessão de um usuário
 @app.get("/duoke/status")
 def duoke_status(user_id: str):
     return {"logged": session_path(user_id).exists()}
 
+# Rota para fazer logout
 @app.post("/duoke/logout")
 def duoke_logout(user_id: str):
     p = session_path(user_id)
