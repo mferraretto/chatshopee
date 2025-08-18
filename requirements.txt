@@ -8,3 +8,4 @@ python-dotenv==1.0.1
 pydantic==2.8.2
 tenacity==8.5.0
 rich==13.7.1
+python-multipart==0.0.9
