@@ -1,6 +1,7 @@
 # src/duoke.py
 import inspect
 import asyncio
+import os
 import re
 import json
 from pathlib import Path
@@ -15,27 +16,40 @@ SEL = json.loads(
 
 class DuokeBot:
     def __init__(self, storage_state_path: str = "storage_state.json"):
-        # Mantido por compat, mas usamos user_data_dir (persistente)
+        # Mantido por compat
         self.storage_state_path = storage_state_path
+        # Página atual (usada pelo espelho da UI)
+        self.current_page = None
 
     # ---------- infra de navegador ----------
 
     async def _new_context(self, p):
         """
         Contexto persistente: mantém cookies/localStorage dentro de 'pw-user-data'.
-        NÃO usar storage_state aqui.
+        Em produção (Render), iniciamos em headless e sem sandbox.
         """
         user_data_dir = Path(__file__).resolve().parents[1] / "pw-user-data"
         user_data_dir.mkdir(exist_ok=True)
+
+        # HEADLESS=1 (padrão) para servidores sem display; HEADLESS=0 no dev local
+        headless = os.getenv("HEADLESS", "1").lower() not in {"0", "false", "no"}
+
         ctx = await p.chromium.launch_persistent_context(
-            user_data_dir=str(user_data_dir),
-            headless=False,
-            args=["--disable-dev-shm-usage"],
-        )
+    user_data_dir=str(user_data_dir),
+    headless=True,  # <- headless no Render
+    args=[
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+    ],
+)
+
         return ctx
 
     async def _get_page(self, ctx):
-        return ctx.pages[0] if ctx.pages else await ctx.new_page()
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        self.current_page = page
+        return page
 
     async def ensure_login(self, page):
         await page.goto(settings.douke_url, wait_until="domcontentloaded")
@@ -380,10 +394,12 @@ class DuokeBot:
             page = await self._get_page(ctx)
             await self.ensure_login(page)
             await self._cycle(page, decide_reply_fn)
-            # Mantém um pouco aberto para inspeção
             print("[DEBUG] Execução concluída. Mantendo o navegador aberto por ~60s...")
             await asyncio.sleep(60)
-            await ctx.close()
+            try:
+                await ctx.close()
+            finally:
+                self.current_page = None
 
     async def run_forever(self, decide_reply_fn, idle_seconds: float = 3.0):
         """
@@ -391,6 +407,7 @@ class DuokeBot:
         Use este método a partir do app_ui (start/stop via task).
         """
         while True:
+            ctx = None
             try:
                 async with async_playwright() as p:
                     ctx = await self._new_context(p)
@@ -402,18 +419,24 @@ class DuokeBot:
                         await asyncio.sleep(idle_seconds)
 
             except asyncio.CancelledError:
-                # Parada solicitada (botão “Parar”)
                 try:
-                    await ctx.close()
-                except Exception:
-                    pass
+                    if ctx:
+                        await ctx.close()
+                finally:
+                    self.current_page = None
                 break
             except PwError as e:
                 print(f"[ERROR] Playwright: {e}. Reiniciando em 2s...")
                 await asyncio.sleep(2)
-                # volta ao topo do while True e recria tudo
                 continue
             except Exception as e:
                 print(f"[ERROR] run_forever: {e}. Tentando novamente em 2s...")
                 await asyncio.sleep(2)
                 continue
+            finally:
+                try:
+                    if ctx:
+                        await ctx.close()
+                except Exception:
+                    pass
+                self.current_page = None
