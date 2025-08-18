@@ -126,8 +126,12 @@ async def duoke_login_start(user_id: str = Form(...), email: str = Form(...), pa
     p = None
     browser = None
     try:
+        # AQUI FOI FEITA A ALTERAÇÃO: adicionando os argumentos para o Playwright
         p = await async_playwright().start()
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
         ctx = await browser.new_context()
         page = await ctx.new_page()
         await page.goto("https://www.duoke.com/", wait_until="domcontentloaded")
