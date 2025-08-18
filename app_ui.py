@@ -420,7 +420,11 @@ async def duoke_connect(email: str = Form(...), password: str = Form(...)):
             ctx = await browser.new_context()
             page = await ctx.new_page()
 
-            await page.goto("https://www.duoke.com/", wait_until="domcontentloaded")
+            await page.goto(
+                "https://www.duoke.com/",
+                wait_until="domcontentloaded",
+                timeout=settings.nav_timeout_ms,
+            )
 
             # Fecha popup "Your login has expired" se aparecer
             try:
@@ -455,7 +459,9 @@ async def duoke_connect(email: str = Form(...), password: str = Form(...)):
 
             # Aguarda pós-login; ajuste se houver redirecionamento específico
             try:
-                await page.wait_for_load_state("networkidle", timeout=15000)
+                await page.wait_for_load_state(
+                    "networkidle", timeout=settings.nav_timeout_ms
+                )
             except Exception:
                 pass
 
@@ -509,7 +515,11 @@ async def _mirror_loop():
         try:
             page = getattr(_bot, "current_page", None)
             if page:
-                buf = await page.screenshot(full_page=False, type="png")
+                buf = await page.screenshot(
+                    full_page=False,
+                    type="png",
+                    timeout=settings.nav_timeout_ms,
+                )
                 ws_broadcast({"screen": base64.b64encode(buf).decode("ascii")})
         except Exception as e:
             log(f"[MIRROR] erro screenshot: {type(e).__name__}: {e!r}")
