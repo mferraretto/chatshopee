@@ -14,7 +14,7 @@ from typing import Optional, Set, Dict
 from collections import deque
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Template
 from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
@@ -88,19 +88,13 @@ HTML = Template(r"""
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link href="/static/tailwind.min.css" rel="stylesheet">
-  <link rel="icon" href="/static/favicon.ico">
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { font-family: sans-serif; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
-.tab-button.active {
-      border-bottom-width: 2px;
-      border-color: rgb(59, 130, 246); /* Tailwind blue-500 */
-      color: rgb(59, 130, 246);
-      font-weight: 500;
-    }
-    </style>
+    .tab-button.active { @apply border-b-2 border-blue-500 text-blue-500 font-medium; }
+  </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
   <div class="container mx-auto p-4 max-w-4xl">
@@ -469,10 +463,6 @@ HTML = Template(r"""
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.get("/favicon.ico")
-async def favicon():
-    return FileResponse("static/favicon.ico")
-    
 CONNECTIONS: Set[WebSocket] = set()
 
 async def ws_broadcast(msg: Dict):
