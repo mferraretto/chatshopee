@@ -32,4 +32,4 @@ RUN pip install --no-cache-dir playwright==1.46.0 && \
 COPY . .
 
 ENV PORT=10000
-CMD ["sh","-c","uvicorn src.app_ui:app --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["sh","-c","uvicorn app_ui:app --host 0.0.0.0 --port ${PORT:-10000}"]
