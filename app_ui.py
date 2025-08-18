@@ -182,9 +182,10 @@ loadRules();
 
 let ws;
 function connectWS(){
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  const scheme = (location.protocol === 'https:') ? 'wss' : 'ws';
+  ws = new WebSocket(`${scheme}://${location.host}/ws`);
   ws.onopen = () => {
-    // Keep-alive ping a cada 20s pra evitar proxies matarem o WS
+    // keep-alive a cada 20s para não derrubar em proxy
     setInterval(() => { try { ws.send('ping'); } catch(e){} }, 20000);
   };
   ws.onmessage = (ev) => {
@@ -217,6 +218,7 @@ function connectWS(){
   ws.onclose = () => setTimeout(connectWS, 2000);
 }
 connectWS();
+
 
 document.getElementById('sendBtn').onclick = async () => {
   await fetch('/action/send', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: proposed.value})});
