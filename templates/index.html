@@ -3,6 +3,7 @@
 <div class="grid">
   <section class="browser">
     <h2>Navegador simulado</h2>
+    <!-- Adicionando o ID para a comunicação do front-end com o iframe -->
     <iframe id="browser-frame" src="/browser" style="width:100%;height:70vh;border:1px solid #333;border-radius:8px;"></iframe>
   </section>
 
@@ -12,7 +13,7 @@
     <label class="blk">Snapshot lido</label>
     <pre id="read-snapshot" class="pane">{{ snapshot or "Aguardando..." }}</pre>
 
-    <label class="blk">Resposta sugerida</label>
+    <label class="blk" style="margin-top: 16px;">Resposta sugerida</label>
     <pre id="reply-preview" class="pane">{{ reply or "Aguardando..." }}</pre>
 
     <div class="controls" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
@@ -163,4 +164,3 @@
 })();
 </script>
 {% endblock %}
-
