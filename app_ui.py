@@ -8,11 +8,12 @@ if sys.platform.startswith("win"):
         pass
 # ----------------------------------------------------------------------
 
-import base64, json, time
+import base64, json, time, os
+from pathlib import Path
 from typing import Optional, Set
 from collections import deque
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Template
@@ -32,6 +33,12 @@ def log(line: str):
     LOGS.append(s)
     print(s)
 
+# ===== Arquivo de sessão do Duoke (Playwright) =====
+STATE_PATH = Path("storage_state.json")
+
+def duoke_is_connected() -> bool:
+    return STATE_PATH.exists() and STATE_PATH.stat().st_size > 10  # heurística simples
+
 # ===== HTML (UI single-file com tabs) =====
 HTML = Template(r"""
 <!doctype html>
@@ -42,7 +49,7 @@ HTML = Template(r"""
   <style>
     :root { --bg:#0b0b0c; --fg:#fff; --mut:#b8b8b8; --card:#141416; --br:#2a2b31; --acc:#6ee7b7;}
     body { background:var(--bg); color:var(--fg); font-family: ui-sans-serif, system-ui, Arial; margin:0; }
-    header { padding:16px 24px; border-bottom:1px solid var(--br); display:flex; align-items:center; gap:14px;}
+    header { padding:16px 24px; border-bottom:1px solid var(--br); display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
     .pill{border:1px solid var(--br); border-radius:999px; padding:4px 10px; color:var(--mut);}
     .tabs { display:flex; gap:10px; padding:10px 24px; border-bottom:1px solid var(--br);}
     .tabs a { text-decoration:none; color:var(--mut); padding:10px 12px; border-radius:10px; }
@@ -57,17 +64,20 @@ HTML = Template(r"""
     #screen { width:100%; aspect-ratio: 16 / 10; background:#000; border-radius:10px; object-fit:contain; }
     #log { height:220px; overflow:auto; font-family:ui-monospace,monospace; background:#0e0e10; border:1px solid var(--br); border-radius:10px; padding:10px; white-space:pre-wrap;}
     textarea,input,select { background:#0e0e10; color:var(--fg); border:1px solid var(--br); border-radius:10px; padding:10px; }
+    input[type="email"],input[type="password"]{ width:280px; }
     table { width:100%; border-collapse:collapse; }
     th, td { border-bottom:1px solid var(--br); padding:8px; text-align:left; color:var(--mut);}
     .msg { border:1px solid var(--br); border-radius:10px; padding:8px; margin:6px 0; }
     .role-buyer { border-left:4px solid #60a5fa; }
     .role-seller { border-left:4px solid #a78bfa; }
+    small.mut { color:var(--mut); }
   </style>
 </head>
 <body>
   <header>
     <strong>Duoke Console</strong>
     <span class="pill">Status: <span id="status">{{ "RUNNING" if running else "IDLE" }}</span></span>
+    <span class="pill">Duoke: <span id="duokeStatus">{{ "Conectado" if duoke_connected else "Desconectado" }}</span></span>
   </header>
 
   <nav class="tabs">
@@ -88,7 +98,7 @@ HTML = Template(r"""
               <form method="post" action="/stop"><button id="btnStop" class="secondary" {{ "" if running else "disabled" }}>■ Parar</button></form>
               <form method="post" action="/run-once"><button class="secondary" {{ "disabled" if running else "" }}>Run once</button></form>
             </div>
-            <small style="color:var(--mut)">Espelho do navegador</small>
+            <small class="mut">Espelho do navegador</small>
           </div>
           <img id="screen" alt="browser mirror"/>
         </div>
@@ -105,13 +115,14 @@ HTML = Template(r"""
 
           <h4>Logs</h4>
           <div id="log"></div>
+          <small class="mut">Dica: mantenha esta aba aberta para não derrubar o WebSocket atrás de proxies.</small>
         </div>
       </div>
     </section>
 
     <!-- ABA CONFIG -->
     <section id="pane-config" style="display:none;">
-      <div class="card">
+      <div class="card" style="margin-bottom:16px;">
         <h3>Configurações</h3>
         <form method="post" action="/save-settings" class="row">
           <label>Max conversations</label><input name="max_conversations" type="number" min="0" value="{{ max_conv }}">
@@ -120,6 +131,18 @@ HTML = Template(r"""
           <label>Selector campo texto</label><input name="input_selector" type="text" value="{{ input_sel }}">
           <button>Salvar</button>
         </form>
+      </div>
+
+      <div class="card">
+        <h3>Conectar ao Duoke</h3>
+        <p class="mut" style="margin-top:0">Faça login aqui para salvar a sessão (cookies) como <code>storage_state.json</code>. O bot reutiliza essa sessão automaticamente.</p>
+        <form id="duoke-connect" class="row" onsubmit="return false;">
+          <input name="email" type="email" placeholder="Email Duoke" required />
+          <input name="password" type="password" placeholder="Senha Duoke" required />
+          <button id="btnDuokeConnect" type="submit">Conectar ao Duoke</button>
+          <button id="btnDuokeDisconnect" type="button" class="secondary">Desconectar</button>
+        </form>
+        <small id="duokeHint" class="mut"></small>
       </div>
     </section>
 
@@ -157,6 +180,8 @@ const reading = document.getElementById('reading');
 const proposed = document.getElementById('proposed');
 const logEl = document.getElementById('log');
 const statusEl = document.getElementById('status');
+const duokeStatusEl = document.getElementById('duokeStatus');
+const duokeHint = document.getElementById('duokeHint');
 
 function switchTab(hash) {
   document.querySelectorAll('.tabs a').forEach(a => a.classList.remove('active'));
@@ -185,7 +210,6 @@ function connectWS(){
   const scheme = (location.protocol === 'https:') ? 'wss' : 'ws';
   ws = new WebSocket(`${scheme}://${location.host}/ws`);
   ws.onopen = () => {
-    // keep-alive a cada 20s para não derrubar em proxy
     setInterval(() => { try { ws.send('ping'); } catch(e){} }, 20000);
   };
   ws.onmessage = (ev) => {
@@ -219,20 +243,70 @@ function connectWS(){
 }
 connectWS();
 
-
 document.getElementById('sendBtn').onclick = async () => {
   await fetch('/action/send', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: proposed.value})});
 }
 document.getElementById('skipBtn').onclick = async () => {
   await fetch('/action/skip', {method:'POST'});
 }
+
+// ====== Duoke: conectar / desconectar / status ======
+async function refreshDuokeStatus(){
+  try{
+    const r = await fetch('/duoke/status');
+    const j = await r.json();
+    duokeStatusEl.textContent = j.connected ? 'Conectado' : 'Desconectado';
+    duokeHint.textContent = j.connected ? 'Sessão salva. Você pode iniciar o bot.' : 'Conecte-se ao Duoke para o bot conseguir ler as conversas.';
+  }catch(e){
+    duokeStatusEl.textContent = 'Desconhecido';
+  }
+}
+refreshDuokeStatus();
+
+document.getElementById('duoke-connect').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const btn = document.getElementById('btnDuokeConnect');
+  btn.disabled = true;
+  btn.textContent = 'Conectando...';
+  try{
+    const res = await fetch('/duoke/connect', { method:'POST', body: fd });
+    if(!res.ok){ const t = await res.text(); alert('Falha ao conectar: ' + t); }
+    else { alert('Duoke conectado!'); }
+  }catch(err){
+    alert('Erro: ' + err);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = 'Conectar ao Duoke';
+    refreshDiokeStatus = null; // noop
+    await refreshDuokeStatus();
+  }
+});
+
+document.getElementById('btnDuokeDisconnect').addEventListener('click', async ()=>{
+  if(!confirm('Remover sessão do Duoke deste servidor?')) return;
+  const btn = document.getElementById('btnDuokeDisconnect');
+  btn.disabled = true;
+  try{
+    const res = await fetch('/duoke/connect', { method:'DELETE' });
+    if(!res.ok){ const t = await res.text(); alert('Falha ao desconectar: ' + t); }
+    else { alert('Sessão removida.'); }
+  }finally{
+    btn.disabled = false;
+    await refreshDuokeStatus();
+  }
+});
 </script>
 </body>
 </html>
 """)
 
 app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Monta /static somente se a pasta existir (evita erro em ambientes sem assets)
+static_dir = Path("static")
+if static_dir.exists() and static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -247,6 +321,7 @@ async def index():
 
     return HTML.render(
         running=RUNNING,
+        duoke_connected=duoke_is_connected(),
         max_conv=(settings.max_conversations or 0),
         depth=(settings.history_depth or 5),
         delay=(settings.delay_between_actions or 1.0),
@@ -259,7 +334,6 @@ async def rules():
 
 @app.get("/reload-rules")
 async def reload_rules():
-    # Como as regras são lidas do disco em /rules, só redirecionar já "recarrega" a tabela
     return RedirectResponse("/", status_code=303)
 
 @app.post("/save-rule")
@@ -315,6 +389,86 @@ async def save_settings(
         log(f"[UI] falha ao atualizar selectors.json: {type(e).__name__}: {e!r}")
     return RedirectResponse("/", status_code=303)
 
+# ===== Endpoints de Conexão Duoke (Playwright) =====
+@app.get("/duoke/status")
+async def duoke_status():
+    return {"connected": duoke_is_connected()}
+
+@app.delete("/duoke/connect")
+async def duoke_disconnect():
+    try:
+        if STATE_PATH.exists():
+            STATE_PATH.unlink()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, f"Falha ao remover sessão: {e}")
+
+@app.post("/duoke/connect")
+async def duoke_connect(email: str = Form(...), password: str = Form(...)):
+    """
+    Faz login no Duoke com Playwright headless e persiste cookies em storage_state.json.
+    """
+    # Import local para não exigir Playwright até alguém usar este endpoint
+    try:
+        from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
+    except Exception as e:
+        raise HTTPException(500, f"Playwright não instalado/configurado: {e}")
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+            ctx = await browser.new_context()
+            page = await ctx.new_page()
+
+            await page.goto("https://www.duoke.com/", wait_until="domcontentloaded")
+
+            # Fecha popup "Your login has expired" se aparecer
+            try:
+                await page.get_by_role("button", name="Confirm").click(timeout=2000)
+            except Exception:
+                pass
+
+            # Seletores comuns; ajuste se o Duoke mudar
+            email_sel = "input[type='email'], input[placeholder*='mail' i]"
+            pass_sel  = "input[type='password'], input[placeholder*='senha' i], input[placeholder*='password' i]"
+
+            # Se não houver campo de email, pode já estar logado
+            if await page.locator(email_sel).count() == 0:
+                # Garante state
+                await ctx.storage_state(path=str(STATE_PATH))
+                await browser.close()
+                return {"ok": True, "already": True}
+
+            await page.fill(email_sel, email)
+            await page.fill(pass_sel, password)
+
+            # Tenta botão Login por role/name
+            try:
+                await page.get_by_role("button", name="Login").click(timeout=3000)
+            except Exception:
+                # Fallback por texto parcial
+                btn = page.locator("button:has-text('Login'), button:has-text('Entrar')")
+                if await btn.count() > 0:
+                    await btn.first.click()
+                else:
+                    raise HTTPException(400, "Botão de login não encontrado")
+
+            # Aguarda pós-login; ajuste se houver redirecionamento específico
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:
+                pass
+
+            # Persistir sessão
+            await ctx.storage_state(path=str(STATE_PATH))
+            await browser.close()
+
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Falha no login: {e}")
+
 # ===== Streaming via WebSocket =====
 CLIENTS: Set[WebSocket] = set()
 def ws_broadcast(payload: dict):
@@ -355,7 +509,6 @@ async def _mirror_loop():
         try:
             page = getattr(_bot, "current_page", None)
             if page:
-                # type='png' garante base64 estável
                 buf = await page.screenshot(full_page=False, type="png")
                 ws_broadcast({"screen": base64.b64encode(buf).decode("ascii")})
         except Exception as e:
@@ -381,7 +534,6 @@ async def _run_cycle(run_once: bool):
         if run_once:
             await _bot.run_once(hook)  # uma passada
         else:
-            # loop infinito com contexto persistente (DuokeBot deve ter run_forever)
             await _bot.run_forever(hook, idle_seconds=5.0)
     except Exception as e:
         LAST_ERR = f"{type(e).__name__}: {e}"
@@ -400,6 +552,8 @@ async def start():
     global _task, RUNNING
     if RUNNING:
         return RedirectResponse("/", status_code=303)
+    if not duoke_is_connected():
+        log("[UI] Duoke não conectado. Faça login na aba Configurações.")
     ws_broadcast({"snapshot": {"running": True}})
     _task = asyncio.create_task(_run_cycle(run_once=False))
     return RedirectResponse("/", status_code=303)
@@ -409,6 +563,8 @@ async def run_once():
     global _task, RUNNING
     if RUNNING:
         return RedirectResponse("/", status_code=303)
+    if not duoke_is_connected():
+        log("[UI] Duoke não conectado. Faça login na aba Configurações.")
     ws_broadcast({"snapshot": {"running": True}})
     _task = asyncio.create_task(_run_cycle(run_once=True))
     return RedirectResponse("/", status_code=303)
@@ -447,4 +603,3 @@ async def action_skip():
     ws_broadcast({"snapshot": {"last_action": "skipped"}})
     log("[UI] conversa pulada manualmente.")
     return JSONResponse({"ok": True})
-
