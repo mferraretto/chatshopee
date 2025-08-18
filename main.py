@@ -1,17 +1,28 @@
-import os, json, base64, uuid, asyncio
+import os
+import json
+import base64
+import uuid
+import asyncio
 from pathlib import Path
 from typing import Dict, Optional
-from fastapi import FastAPI, HTTPException, Form
+
+# Importações do FastAPI
+from fastapi import FastAPI, HTTPException, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+
+# Importações do Playwright
 from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
+
+# Importações de Criptografia
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 # ===== Config =====
-SESS_DIR = Path("sessions"); SESS_DIR.mkdir(exist_ok=True)
-SECRET = os.getenv("SESSION_ENC_SECRET", "troque-isto-no-render")  # defina no Render
-LOGIN_WAIT_TIMEOUT = 180000  # ms (3 min) para esperar dashboard após verificar código
+SESS_DIR = Path("sessions")
+SESS_DIR.mkdir(exist_ok=True)
+SECRET = os.getenv("SESSION_ENC_SECRET", "troque-isto-no-render")
+LOGIN_WAIT_TIMEOUT = 180000
 
 # ===== Cripto AES-GCM com PBKDF2 (igual ao seu padrão) =====
 def _derive_key(secret: str, salt: bytes) -> bytes:
@@ -19,13 +30,17 @@ def _derive_key(secret: str, salt: bytes) -> bytes:
     return kdf.derive(secret.encode("utf-8"))
 
 def encrypt_bytes(data: bytes, secret: str) -> bytes:
-    salt = os.urandom(16); key = _derive_key(secret, salt); aes = AESGCM(key); iv = os.urandom(12)
+    salt = os.urandom(16)
+    key = _derive_key(secret, salt)
+    aes = AESGCM(key)
+    iv = os.urandom(12)
     ct = aes.encrypt(iv, data, None)
-    return salt + iv + ct  # pacote
+    return salt + iv + ct
 
 def decrypt_bytes(packed: bytes, secret: str) -> bytes:
     salt, iv, ct = packed[:16], packed[16:28], packed[28:]
-    key = _derive_key(secret, salt); aes = AESGCM(key)
+    key = _derive_key(secret, salt)
+    aes = AESGCM(key)
     return aes.decrypt(iv, ct, None)
 
 def session_path(user_id: str) -> Path:
@@ -44,9 +59,9 @@ PENDING: Dict[str, Pending] = {}
 PENDING_TTL = 10 * 60  # 10 min
 
 async def cleanup_pending():
-    # simples coletor (chamado no fim de cada request relevante)
+    # Coletor simples (chamado no fim de cada request relevante)
     now = asyncio.get_event_loop().time()
-    stale = [k for k,v in PENDING.items() if now - v.created > PENDING_TTL]
+    stale = [k for k, v in PENDING.items() if now - v.created > PENDING_TTL]
     for k in stale:
         try:
             await PENDING[k].browser.close()
@@ -56,6 +71,11 @@ async def cleanup_pending():
 
 # ===== FastAPI =====
 app = FastAPI()
+
+# Rota para health check, necessária para plataformas como o Render
+@app.get("/healthz")
+async def health_check():
+    return {"status": "ok"}
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -103,6 +123,8 @@ def home():
 @app.post("/duoke/login/start")
 async def duoke_login_start(user_id: str = Form(...), email: str = Form(...), password: str = Form(...)):
     await cleanup_pending()
+    p = None
+    browser = None
     try:
         p = await async_playwright().start()
         browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
@@ -130,7 +152,6 @@ async def duoke_login_start(user_id: str = Form(...), email: str = Form(...), pa
             enc = encrypt_bytes(tmp.read_bytes(), SECRET)
             session_path(user_id).write_bytes(enc)
             tmp.unlink(missing_ok=True)
-            await browser.close(); await p.stop()
             return JSONResponse({"ok": True, "status": "LOGGED", "msg": "Sessão criada sem pedir código."})
         except Exception:
             pass
@@ -144,7 +165,6 @@ async def duoke_login_start(user_id: str = Form(...), email: str = Form(...), pa
                 await code_input.wait_for(timeout=8000)
             except Exception:
                 # Não achou input → provavelmente login falhou por outro motivo
-                await browser.close(); await p.stop()
                 raise HTTPException(400, "Não foi possível localizar o campo de código. Verifique o login.")
 
         # Cria tentativa pendente
@@ -156,6 +176,9 @@ async def duoke_login_start(user_id: str = Form(...), email: str = Form(...), pa
         raise
     except Exception as e:
         raise HTTPException(400, f"Falha ao iniciar login: {e}")
+    finally:
+        if p and not browser:
+            await p.stop()
 
 @app.post("/duoke/login/code")
 async def duoke_login_code(attempt_id: str = Form(...), user_id: str = Form(...), code: str = Form(...)):
@@ -207,5 +230,6 @@ def duoke_status(user_id: str):
 @app.post("/duoke/logout")
 def duoke_logout(user_id: str):
     p = session_path(user_id)
-    if p.exists(): p.unlink()
+    if p.exists():
+        p.unlink()
     return {"ok": True}
