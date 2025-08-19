@@ -3,6 +3,7 @@ import asyncio
 from pathlib import Path
 from playwright.async_api import async_playwright
 from .config import settings
+from .duoke import DuokeBot
 
 # Usa o mesmo diretório de perfil que o bot principal para que o login
 # manual possa ser reutilizado pelas execuções automatizadas.
@@ -19,6 +20,11 @@ async def main():
         )
         page = await ctx.new_page()
         await page.goto(settings.douke_url, timeout=settings.goto_timeout_ms)
+        # Fecha automaticamente modal de sessão expirada (botão "Confirmar")
+        try:
+            await DuokeBot()._try_close_modal(page)
+        except Exception:
+            pass
         print(">>> Faça login no Douke no navegador aberto.")
         input(">>> Quando terminar o login e enxergar suas conversas, pressione Enter aqui... ")
         # Exporta a sessão para storage_state.json (vamos usar isso nos runs)
