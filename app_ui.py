@@ -191,6 +191,23 @@ const statusEl = document.getElementById('status');
 const duokeStatusEl = document.getElementById('duokeStatus');
 const duokeHint = document.getElementById('duokeHint');
 
+screen.addEventListener('click', async ev => {
+  const rect = screen.getBoundingClientRect();
+  const scaleX = screen.naturalWidth / rect.width;
+  const scaleY = screen.naturalHeight / rect.height;
+  const x = ev.offsetX * scaleX;
+  const y = ev.offsetY * scaleY;
+  try {
+    await fetch('/action/mouse-click', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ x, y })
+    });
+  } catch (e) {
+    console.error('mouse click failed', e);
+  }
+});
+
 function switchTab(hash) {
   document.querySelectorAll('.tabs a').forEach(a => a.classList.remove('active'));
   document.querySelectorAll('main section').forEach(s => s.style.display='none');
@@ -664,6 +681,25 @@ async def action_close_modal():
         except Exception as e:
             log(f"[UI] erro ao fechar modal: {type(e).__name__}: {e}")
             return JSONResponse({"ok": False, "error": str(e)})
+    return JSONResponse({"ok": True})
+
+
+@app.post("/action/mouse-click")
+async def action_mouse_click(req: Request):
+    bot = _bot
+    page = getattr(bot, "current_page", None) if bot else None
+    if not (page and bot):
+        return JSONResponse({"ok": False, "error": "no active page"})
+    data = await req.json()
+    try:
+        x = float(data.get("x", 0))
+        y = float(data.get("y", 0))
+        await page.mouse.move(x, y)
+        await page.mouse.click(x, y)
+        log(f"[UI] mouse click at {x:.0f},{y:.0f}")
+    except Exception as e:
+        log(f"[UI] erro mouse click: {type(e).__name__}: {e}")
+        return JSONResponse({"ok": False, "error": str(e)})
     return JSONResponse({"ok": True})
 
 
