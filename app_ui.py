@@ -120,6 +120,16 @@ HTML = Template(r"""
             <button id="btnSendCode">Enviar código</button>
           </div>
 
+          <h4 style="margin-top:16px;">Conectar ao Duoke</h4>
+          <p class="mut" style="margin-top:0">Faça login aqui para salvar a sessão (cookies) como <code>storage_state.json</code>. O bot reutiliza essa sessão automaticamente.</p>
+          <form id="duoke-connect" class="row" onsubmit="return false;">
+            <input name="email" type="email" placeholder="Email Duoke" required />
+            <input name="password" type="password" placeholder="Senha Duoke" required />
+            <button id="btnDuokeConnect" type="submit">Conectar ao Duoke</button>
+            <button id="btnDuokeDisconnect" type="button" class="secondary">Desconectar</button>
+          </form>
+          <small id="duokeHint" class="mut"></small>
+
           <h4>Logs</h4>
           <div id="log"></div>
           <small class="mut">Dica: mantenha esta aba aberta para não derrubar o WebSocket atrás de proxies.</small>
@@ -138,18 +148,6 @@ HTML = Template(r"""
           <label>Selector campo texto</label><input name="input_selector" type="text" value="{{ input_sel }}">
           <button>Salvar</button>
         </form>
-      </div>
-
-      <div class="card">
-        <h3>Conectar ao Duoke</h3>
-        <p class="mut" style="margin-top:0">Faça login aqui para salvar a sessão (cookies) como <code>storage_state.json</code>. O bot reutiliza essa sessão automaticamente.</p>
-        <form id="duoke-connect" class="row" onsubmit="return false;">
-          <input name="email" type="email" placeholder="Email Duoke" required />
-          <input name="password" type="password" placeholder="Senha Duoke" required />
-          <button id="btnDuokeConnect" type="submit">Conectar ao Duoke</button>
-          <button id="btnDuokeDisconnect" type="button" class="secondary">Desconectar</button>
-        </form>
-        <small id="duokeHint" class="mut"></small>
       </div>
     </section>
 
