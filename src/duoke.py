@@ -53,6 +53,7 @@ class DuokeBot:
         ctx = await p.chromium.launch_persistent_context(
             user_data_dir=str(user_data_dir),
             headless=headless,  # << corrigido: usa variável
+            ignore_https_errors=True,
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
