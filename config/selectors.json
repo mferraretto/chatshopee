@@ -9,7 +9,7 @@
 
   "input_textarea": "textarea, [contenteditable='true']",
 
-  "modal_confirm_button": ".el-dialog__footer .el-button--primary, button:has-text('Confirm'), button:has-text('OK'), .el-message-box__btns .el-button--primary",
+  "modal_confirm_button": ".el-message-box__btns .el-button, .el-dialog__footer .el-button--primary, button:has-text('Confirm'), button:has-text('OK')",
 
   "verify_code_input": "input[placeholder*='code' i], input[aria-label*='code' i], input[name*='code' i]",
   "verify_submit": "button:has-text('Verify'), button:has-text('Confirm'), .el-button--primary",
