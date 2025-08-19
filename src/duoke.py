@@ -541,10 +541,10 @@ class DuokeBot:
             sel = SEL.get("modal_confirm_button") or ""
             if not sel:
                 # fallback por texto
-                btn = page.get_by_role("button", name=re.compile(r"^(OK|Confirm|Fechar|Entendi)$", re.I))
+                btn = page.get_by_role("button", name=re.compile(r"^(OK|Confirm|Confirmar|Fechar|Entendi)$", re.I))
                 await btn.first.click(timeout=3000)
                 return True
-            btn = page.locator(sel)
+            btn = page.locator(sel).locator(":visible")
             if await btn.count() > 0:
                 await btn.first.click(timeout=3000)
                 await page.wait_for_timeout(500)
