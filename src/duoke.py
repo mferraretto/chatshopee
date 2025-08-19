@@ -16,7 +16,7 @@ SEL = json.loads(
     .read_text(encoding="utf-8")
 )
 
-CONFIRM_RE = re.compile(r"(confirm|ok|continue|verify|submit|login|entrar|确认|確定|确定)", re.I)
+CONFIRM_RE = re.compile(r"(confirm|confirmar|ok|continue|verify|submit|login|entrar|fechar|entendi|确认|確定|确定)", re.I)
 
 def _env_or_settings(name_env: str, name_settings: str, default: str = "") -> str:
     v = os.getenv(name_env)
@@ -541,7 +541,7 @@ class DuokeBot:
             sel = SEL.get("modal_confirm_button") or ""
             if not sel:
                 # fallback por texto
-                btn = page.get_by_role("button", name=re.compile(r"^(OK|Confirm|Fechar|Entendi)$", re.I))
+                btn = page.get_by_role("button", name=CONFIRM_RE)
                 await btn.first.click(timeout=3000)
                 return True
             btn = page.locator(sel)
