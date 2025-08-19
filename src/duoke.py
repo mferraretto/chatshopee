@@ -17,6 +17,7 @@ SEL = json.loads(
 )
 
 CONFIRM_RE = re.compile(r"(confirm|ok|continue|verify|submit|login|entrar|确认|確定|确定)", re.I)
+MODAL_CONFIRM_RE = re.compile(r"^(Confirm|Confirmar|确定|确认|OK)$", re.I)
 
 def _env_or_settings(name_env: str, name_settings: str, default: str = "") -> str:
     v = os.getenv(name_env)
@@ -536,19 +537,68 @@ class DuokeBot:
     # ---------- ações manuais de login/2FA ----------
 
     async def close_modal(self, page):
-        """Fecha o modal de aviso/confirm se estiver aberto."""
+        """Fecha o MessageBox/modal caso esteja presente."""
+        selectors = []
+        sel_cfg = SEL.get("modal_confirm_button") or ""
+        if sel_cfg:
+            selectors.append(sel_cfg)
+        selectors.extend(
+            [
+                ".el-message-box__btns button.el-button--primary",
+                ".el-dialog__footer button.el-button--primary",
+            ]
+        )
+        frames = [page, *page.frames]
+
+        # por texto
+        for fr in frames:
+            try:
+                btn = fr.get_by_role("button", name=MODAL_CONFIRM_RE)
+                await btn.first.click(timeout=1000)
+                await fr.wait_for_timeout(300)
+                return True
+            except Exception:
+                pass
+
+        # por CSS
+        for fr in frames:
+            for sel in selectors:
+                try:
+                    btn = fr.locator(sel)
+                    if await btn.count() > 0:
+                        await btn.first.click(timeout=1000)
+                        await fr.wait_for_timeout(300)
+                        return True
+                except Exception:
+                    continue
+
+        # via JS
+        js = """
+            () => {
+                const sels = ['.el-message-box__btns button.el-button--primary',
+                              '.el-dialog__footer button.el-button--primary',
+                              '.el-message-box__btns button',
+                              '.el-dialog__footer button'];
+                for (const s of sels) {
+                    const btn = document.querySelector(s);
+                    if (btn) { btn.click(); return true; }
+                }
+                return false;
+            }
+        """
+        for fr in frames:
+            try:
+                if await fr.evaluate(js):
+                    await fr.wait_for_timeout(300)
+                    return True
+            except Exception:
+                pass
+
+        # Enter como último recurso
         try:
-            sel = SEL.get("modal_confirm_button") or ""
-            if not sel:
-                # fallback por texto
-                btn = page.get_by_role("button", name=re.compile(r"^(OK|Confirm|Confirmar|Fechar|Entendi)$", re.I))
-                await btn.first.click(timeout=3000)
-                return True
-            btn = page.locator(sel).locator(":visible")
-            if await btn.count() > 0:
-                await btn.first.click(timeout=3000)
-                await page.wait_for_timeout(500)
-                return True
+            await page.keyboard.press("Enter")
+            await page.wait_for_timeout(300)
+            return True
         except Exception:
             pass
         return False
