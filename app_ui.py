@@ -575,7 +575,8 @@ async def _mirror_loop():
                 ws_broadcast({"screen": base64.b64encode(buf).decode("ascii")})
         except Exception as e:
             log(f"[MIRROR] erro screenshot: {type(e).__name__}: {e!r}")
-        await asyncio.sleep(1.2)
+        # Throttle para reduzir uso de CPU/Rede
+        await asyncio.sleep(2.5)
 
 async def _run_cycle(run_once: bool):
     # run_once=True executa uma varredura; False mantém laço infinito

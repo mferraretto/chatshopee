@@ -124,4 +124,16 @@ Edite `config/selectors.json` caso a sua UI seja diferente.
 - **Erros 429/anti‑bot**: aumente delays e reduza frequência de varredura.
 - **Gemini indisponível**: o classificador faz fallback para regras simples.
 
+## Dicas de Deploy / Performance
+
+- Hospede o serviço o mais perto possível do Brasil (ex.: região São Paulo em GCP/AWS/Fly.io) para reduzir latência.
+- Execute o robô Playwright em um **worker** dedicado e mantenha um web service leve só para a UI/WS.
+- Prefira instâncias com CPU dedicada e pelo menos 2&nbsp;vCPU e 2–4&nbsp;GB de RAM.
+- Desative auto-suspend/"sleep" para evitar cold starts.
+- Bloqueie fontes, mídia e analytics via `route()` e use viewport menor (ex.: 1366×768).
+- Faça screenshots apenas da área relevante e com intervalo maior (2–3&nbsp;s).
+- Reaproveite browser/context entre tarefas e defina timeouts curtos (`page.set_default_timeout(6000)`), com retries/backoff.
+- Instale fontes básicas no container (ex.: `fonts-liberation`, `fonts-noto`) ou aborte requisições de fonte.
+- Ajuste a frequência de health checks (30–60&nbsp;s) e, se possível, execute o espelho em processo separado do robô.
+
 Bom uso!

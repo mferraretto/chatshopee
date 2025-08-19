@@ -1,11 +1,21 @@
 services:
+  - type: worker
+    name: duoke-bot
+    env: docker
+    plan: starter
+    autoDeploy: true
+    startCommand: python -m src.run_loop
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
   - type: web
     name: duoke-console
     env: docker
-    plan: free
+    plan: starter
     autoDeploy: true
     startCommand: uvicorn app_ui:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /
+    healthCheckPath: /healthz
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"

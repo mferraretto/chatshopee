@@ -58,43 +58,48 @@ class DuokeBot:
             user_data_dir=str(user_data_dir),
             headless=headless,  # << corrigido: usa variável
             ignore_https_errors=True,
+            viewport={"width": 1366, "height": 768},
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
             ],
         )
-        # Evita travar em fontes não carregadas e animações que atrasam cliques
+        
+async def _route_handler(route):
+    req = route.request
+    try:
+        url = req.url.lower()
+        # corta fontes, mídia e chamadas de analytics para reduzir I/O e evitar travas
+        if req.resource_type in {"font", "media"} or "analytics" in url or "font" in url:
+            await route.abort()
+        else:
+            await route.continue_()
+    except Exception:
+        # fallback defensivo para não quebrar o fluxo
+        try:
+            await route.continue_()
+        except Exception:
+            pass
 
-        async def _route_handler(route):
-            try:
-                if route.request.resource_type == "font":
-                    await route.abort()
-                else:
-                    await route.continue_()
-            except Exception:
-                try:
-                    await route.continue_()
-                except Exception:
-                    pass
+# importante: no contexto assíncrono, route deve ser aguardado
+await ctx.route("**/*", _route_handler)
 
-        await ctx.route("**/*", _route_handler)
+# injeta CSS para não depender de animações/transitions que atrasam cliques
+ctx.add_init_script("""
+(() => {
+  const style = document.createElement('style');
+  style.innerHTML = '*{animation:none!important;transition:none!important;}';
+  document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
+})();
+""")
 
-        ctx.add_init_script(
-            """
-            () => {
-                const style = document.createElement('style');
-                style.innerHTML = '*{animation:none!important;transition:none!important;}';
-                document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
-            }
-            """
-        )
-
-        return ctx
+return ctx
 
     async def _get_page(self, ctx):
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         self.current_page = page
+        page.set_default_timeout(6000)
         return page
 
     # ---------- utilitários de login / 2FA ----------
@@ -807,10 +812,10 @@ class DuokeBot:
         Loop infinito, com auto-recuperação.
         Use este método a partir do app_ui (start/stop via task).
         """
-        while True:
-            ctx = None
-            try:
-                async with async_playwright() as p:
+        async with async_playwright() as p:
+            while True:
+                ctx = None
+                try:
                     ctx = await self._new_context(p)
                     page = await self._get_page(ctx)
                     await self.ensure_login(page)
@@ -819,25 +824,25 @@ class DuokeBot:
                         await self._cycle(page, decide_reply_fn)
                         await asyncio.sleep(idle_seconds)
 
-            except asyncio.CancelledError:
-                try:
-                    if ctx:
-                        await ctx.close()
+                except asyncio.CancelledError:
+                    try:
+                        if ctx:
+                            await ctx.close()
+                    finally:
+                        self.current_page = None
+                    break
+                except PwError as e:
+                    print(f"[ERROR] Playwright: {e}. Reiniciando em 2s...")
+                    await asyncio.sleep(2)
+                    continue
+                except Exception as e:
+                    print(f"[ERROR] run_forever: {e}. Tentando novamente em 2s...")
+                    await asyncio.sleep(2)
+                    continue
                 finally:
+                    try:
+                        if ctx:
+                            await ctx.close()
+                    except Exception:
+                        pass
                     self.current_page = None
-                break
-            except PwError as e:
-                print(f"[ERROR] Playwright: {e}. Reiniciando em 2s...")
-                await asyncio.sleep(2)
-                continue
-            except Exception as e:
-                print(f"[ERROR] run_forever: {e}. Tentando novamente em 2s...")
-                await asyncio.sleep(2)
-                continue
-            finally:
-                try:
-                    if ctx:
-                        await ctx.close()
-                except Exception:
-                    pass
-                self.current_page = None
