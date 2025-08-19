@@ -93,6 +93,7 @@ def home():
         <label>Seu UID: <input id="uid" name="user_id" required></label><br/><br/>
         <label>Email Duoke: <input id="email" name="email" type="email" required></label><br/><br/>
         <label>Senha Duoke: <input id="password" name="password" type="password" required></label><br/><br/>
+        <label>Verificação (captcha): <input id="captcha" name="captcha"></label><br/><br/>
         <button>Iniciar login</button>
       </form>
       <div id="step2" style="display:none; margin-top:20px;">
@@ -109,6 +110,7 @@ def home():
           fd.append('user_id', userId);
           fd.append('email', document.getElementById('email').value);
           fd.append('password', document.getElementById('password').value);
+          fd.append('captcha', document.getElementById('captcha').value);
           const rs = await fetch('/duoke/login/start', {method:'POST', body: fd});
           const js = await rs.json();
           document.getElementById('out').textContent = JSON.stringify(js, null, 2);
@@ -129,7 +131,12 @@ def home():
 
 # Rota para iniciar o processo de login
 @app.post("/duoke/login/start")
-async def duoke_login_start(user_id: str = Form(...), email: str = Form(...), password: str = Form(...)):
+async def duoke_login_start(
+    user_id: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    captcha: Optional[str] = Form(None),
+):
     await cleanup_pending() # Limpa tentativas expiradas antes de começar
     p = None
     browser = None
@@ -146,15 +153,26 @@ async def duoke_login_start(user_id: str = Form(...), email: str = Form(...), pa
         # Navega para a página de login
         await page.goto("https://www.duoke.com/", wait_until="domcontentloaded")
 
-        # Tenta fechar o modal "Your login has expired..." se ele aparecer
+        # Tenta fechar o modal "Your login has expired..." ou similar, se aparecer
         try:
-            await page.get_by_role("button", name="Confirm").click(timeout=2000)
+            await page.get_by_role(
+                "button",
+                name=lambda n: n and ("confirm" in n.lower() or "ok" in n.lower()),
+            ).click(timeout=10000)
         except PWTimeoutError:
             pass
 
         # Preenche o formulário de login com as informações fornecidas
         await page.fill("input[type='email'], input[placeholder='Email']", email)
         await page.fill("input[type='password'], input[placeholder='Password']", password)
+        if captcha:
+            try:
+                await page.fill(
+                    "input[name*='captcha' i], input[placeholder*='captcha' i], input[name*='verify' i], input[placeholder*='verification' i]",
+                    captcha,
+                )
+            except PWTimeoutError:
+                pass
         await page.get_by_role("button", name="Login").click()
 
         # Tenta detectar o dashboard imediatamente (se o 2FA não for necessário)
