@@ -66,11 +66,11 @@ class DuokeBot:
             ],
         )
         
-async def _route_handler(route):
-    req = route.request
-    try:
+    async def _route_handler(route):
+        req = route.request
+        try:
         url = req.url.lower()
-        # corta fontes, mídia e chamadas de analytics para reduzir I/O e evitar travas
+            # corta fontes, mídia e chamadas de analytics para reduzir I/O e evitar travas
         if req.resource_type in {"font", "media"} or "analytics" in url or "font" in url:
             await route.abort()
         else:
@@ -83,18 +83,18 @@ async def _route_handler(route):
             pass
 
 # importante: no contexto assíncrono, route deve ser aguardado
-await ctx.route("**/*", _route_handler)
+    await ctx.route("**/*", _route_handler)
 
-# injeta CSS para não depender de animações/transitions que atrasam cliques
-ctx.add_init_script("""
-(() => {
-  const style = document.createElement('style');
-  style.innerHTML = '*{animation:none!important;transition:none!important;}';
-  document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
-})();
-""")
+    # injeta CSS para não depender de animações/transitions que atrasam cliques
+    ctx.add_init_script("""
+    (() => {
+      const style = document.createElement('style');
+      style.innerHTML = '*{animation:none!important;transition:none!important;}';
+      document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
+    })();
+    """)
 
-return ctx
+    return ctx
 
     async def _get_page(self, ctx):
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
