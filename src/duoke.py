@@ -16,7 +16,11 @@ SEL = json.loads(
     .read_text(encoding="utf-8")
 )
 
-CONFIRM_RE = re.compile(r"(confirm|ok|continue|verify|submit|login|entrar|确认|確定|确定)", re.I)
+# Botões de confirmação comuns em modais (várias línguas)
+CONFIRM_RE = re.compile(
+    r"(confirm|confirmar|ok|continue|verify|submit|login|entrar|fechar|确认|確定|确定)",
+    re.I,
+)
 
 def _env_or_settings(name_env: str, name_settings: str, default: str = "") -> str:
     v = os.getenv(name_env)
@@ -69,39 +73,68 @@ class DuokeBot:
 
     # ---------- utilitários de login / 2FA ----------
 
-    async def _click_confirm_anywhere(self, page_or_frame) -> bool:
-        # por role
+    async def _click_confirm_anywhere(self, target) -> Optional[str]:
+        """Tenta clicar num botão de confirmação no frame dado."""
+        # por role/name
         try:
-            await page_or_frame.get_by_role("button", name=CONFIRM_RE).click(timeout=1200)
-            return True
+            await target.get_by_role("button", name=CONFIRM_RE).first.click(timeout=1200)
+            return "role"
         except PWTimeoutError:
             pass
-        # por texto
-        for text in ["Confirm", "OK", "Continue", "Verify", "Login", "Entrar", "确认", "確定", "确定"]:
-            try:
-                await page_or_frame.locator(f"text={text}").first.click(timeout=800)
-                return True
-            except PWTimeoutError:
-                continue
-        # Enter como último recurso
-        try:
-            await page_or_frame.keyboard.press("Enter")
-            return True
-        except Exception:
-            return False
 
-    async def _try_close_modal(self, page):
-        # página principal
+        # por seletores CSS comuns
+        css_candidates = [
+            SEL.get("modal_confirm_button", ""),
+            ".el-message-box__btns button",
+            ".el-dialog__footer .el-button--primary",
+            "button.el-button--primary",
+        ]
+        for sel in css_candidates:
+            if not sel:
+                continue
+            loc = target.locator(sel).locator(":visible")
+            try:
+                if await loc.count() > 0:
+                    await loc.first.click(timeout=800)
+                    return f"css:{sel}"
+            except PWTimeoutError:
+                try:
+                    await target.evaluate(
+                        "sel => { const el = document.querySelector(sel); if (el) el.click(); }",
+                        sel,
+                    )
+                    return f"js:{sel}"
+                except Exception:
+                    continue
+
+        # Busca genérica via JS por texto
         try:
-            await self._click_confirm_anywhere(page)
+            clicked = await target.evaluate(
+                "names => {\n"
+                "  const norm = s => (s || '').trim().toLowerCase();\n"
+                "  const btn = Array.from(document.querySelectorAll('button')).find(b => names.includes(norm(b.textContent)));\n"
+                "  if (btn) { btn.click(); return true; }\n"
+                "  return false;\n"
+                "}",
+                ["confirm", "确定", "确认", "ok", "confirmar", "fechar"],
+            )
+            if clicked:
+                return "js:text"
         except Exception:
             pass
-        # iframes
-        for fr in page.frames:
-            try:
-                await self._click_confirm_anywhere(fr)
-            except Exception:
-                pass
+
+        # Enter como último recurso
+        try:
+            await target.keyboard.press("Enter")
+            return "enter"
+        except Exception:
+            return None
+
+    async def _try_close_modal(self, page):
+        try:
+            await self.close_modal(page)
+        except Exception:
+            pass
 
     async def _find_login_frame(self, page):
         """
@@ -536,21 +569,25 @@ class DuokeBot:
     # ---------- ações manuais de login/2FA ----------
 
     async def close_modal(self, page):
-        """Fecha o modal de aviso/confirm se estiver aberto."""
-        try:
-            sel = SEL.get("modal_confirm_button") or ""
-            if not sel:
-                # fallback por texto
-                btn = page.get_by_role("button", name=re.compile(r"^(OK|Confirm|Confirmar|Fechar|Entendi)$", re.I))
-                await btn.first.click(timeout=3000)
+        """Fecha modais de aviso/confirm presentes na página ou iframes."""
+        frames = [page] + list(page.frames)
+        for fr in frames:
+            try:
+                method = await self._click_confirm_anywhere(fr)
+            except Exception:
+                continue
+            if method:
+                # Aguarda o wrapper sumir
+                try:
+                    await fr.locator(
+                        ".el-message-box__wrapper, .el-dialog__wrapper"
+                    ).locator(":visible").first.wait_for(state="hidden", timeout=3000)
+                except Exception:
+                    await page.wait_for_timeout(500)
+                where = "iframe" if fr is not page else "page"
+                print(f"[DEBUG] close_modal: {method} in {where}")
                 return True
-            btn = page.locator(sel).locator(":visible")
-            if await btn.count() > 0:
-                await btn.first.click(timeout=3000)
-                await page.wait_for_timeout(500)
-                return True
-        except Exception:
-            pass
+        print("[DEBUG] close_modal: nenhum modal visível")
         return False
 
     async def enter_verification_code(self, page, code: str):
