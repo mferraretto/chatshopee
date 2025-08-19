@@ -132,15 +132,17 @@ class DuokeBot:
 
     async def _is_logged_ui(self, page) -> bool:
         """
-        Considera logado se achar contêiner de chat ou mensagens.
+        Considera logado se achar contêiner de chat ou mensagens
+        visíveis.
         """
         chat_list_container = SEL.get("chat_list_container", "")
         chat_list_item = SEL.get("chat_list_item", "ul.chat_list li")
         try:
             if chat_list_container:
-                loc = page.locator(f"{chat_list_container}, {chat_list_item}, ul.message_main")
+                sel = f"{chat_list_container}, {chat_list_item}, ul.message_main"
             else:
-                loc = page.locator(f"{chat_list_item}, ul.message_main")
+                sel = f"{chat_list_item}, ul.message_main"
+            loc = page.locator(sel).locator(":visible")
             return await loc.count() > 0
         except Exception:
             return False
