@@ -22,7 +22,7 @@ async def main():
         await page.goto(settings.douke_url, timeout=settings.goto_timeout_ms)
         # Fecha automaticamente modal de sessão expirada (botão "Confirmar")
         try:
-            await DuokeBot()._try_close_modal(page)
+            await DuokeBot().close_modal(page)
         except Exception:
             pass
         print(">>> Faça login no Douke no navegador aberto.")
