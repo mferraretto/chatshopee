@@ -171,7 +171,11 @@ class DuokeBot:
         tenta detectar 2FA. Se 2FA for solicitado, deixa self.awaiting_2fa=True
         e retorna (sem levantar exceção) — a UI deve chamar provide_2fa_code().
         """
-        await page.goto(settings.douke_url, wait_until="domcontentloaded")
+        await page.goto(
+            settings.douke_url,
+            wait_until="domcontentloaded",
+            timeout=settings.goto_timeout_ms,
+        )
 
         # Aguarda rede “assentar”
         try:

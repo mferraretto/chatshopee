@@ -13,5 +13,6 @@ class Settings(BaseModel):
     loop_interval: int = int(os.getenv("LOOP_INTERVAL", "30"))
     delay_after_nav: float = float(os.getenv("DELAY_AFTER_NAV", "1"))
     delay_between_actions: float = float(os.getenv("DELAY_BETWEEN_ACTIONS", "0.1"))
+    goto_timeout_ms: int = int(os.getenv("GOTO_TIMEOUT_MS", "60000"))
 
 settings = Settings()

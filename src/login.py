@@ -18,7 +18,7 @@ async def main():
             headless=False,
         )
         page = await ctx.new_page()
-        await page.goto(settings.douke_url)
+        await page.goto(settings.douke_url, timeout=settings.goto_timeout_ms)
         print(">>> Faça login no Douke no navegador aberto.")
         input(">>> Quando terminar o login e enxergar suas conversas, pressione Enter aqui... ")
         # Exporta a sessão para storage_state.json (vamos usar isso nos runs)

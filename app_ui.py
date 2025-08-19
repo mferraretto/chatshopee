@@ -432,7 +432,11 @@ async def duoke_connect(email: str = Form(...), password: str = Form(...)):
             ctx = await browser.new_context()
             page = await ctx.new_page()
 
-            await page.goto("https://www.duoke.com/", wait_until="domcontentloaded")
+            await page.goto(
+                "https://www.duoke.com/",
+                wait_until="domcontentloaded",
+                timeout=settings.goto_timeout_ms,
+            )
 
             # Fecha popup "Your login has expired" se aparecer
             try:
