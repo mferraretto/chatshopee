@@ -13,6 +13,9 @@ from fastapi.responses import HTMLResponse, JSONResponse
 # Importações do Playwright para automatizar o navegador
 from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
 
+# Configurações compartilhadas
+from src.config import settings
+
 # Importações de Criptografia para garantir a segurança da sessão
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
@@ -151,7 +154,11 @@ async def duoke_login_start(
         ctx = await browser.new_context()
         page = await ctx.new_page()
         # Navega para a página de login
-        await page.goto("https://www.duoke.com/", wait_until="domcontentloaded")
+        await page.goto(
+            "https://www.duoke.com/",
+            wait_until="domcontentloaded",
+            timeout=settings.goto_timeout_ms,
+        )
 
         # Tenta fechar o modal "Your login has expired..." ou similar, se aparecer
         try:
