@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional, Set
 from collections import deque
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTPException, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Template
@@ -302,6 +302,18 @@ document.getElementById('btnDuokeDisconnect').addEventListener('click', async ()
 """)
 
 app = FastAPI()
+
+
+@app.head("/")
+async def root_head() -> Response:
+    """Simple HEAD handler for platform health checks."""
+    return Response(status_code=200)
+
+
+@app.get("/healthz")
+async def health_check() -> dict:
+    """Health check endpoint used by deployment platforms."""
+    return {"status": "ok"}
 
 # Monta /static somente se a pasta existir (evita erro em ambientes sem assets)
 static_dir = Path("static")
