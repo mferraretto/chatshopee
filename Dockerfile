@@ -17,6 +17,11 @@ COPY requirements.txt /app/
 # Instala as libs Python do seu projeto
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Instala fontes comuns para evitar bloqueios de carregamento
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-liberation fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copia o resto do código
 COPY . /app
 

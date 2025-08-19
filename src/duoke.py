@@ -58,17 +58,29 @@ class DuokeBot:
             user_data_dir=str(user_data_dir),
             headless=headless,  # << corrigido: usa variável
             ignore_https_errors=True,
+            viewport={"width": 1366, "height": 768},
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
             ],
         )
+
+        # Bloqueia fontes, mídia e analytics para reduzir I/O
+        async def _block(route):
+            r = route.request
+            if r.resource_type in {"font", "media"} or "analytics" in r.url or "font" in r.url:
+                await route.abort()
+            else:
+                await route.continue_()
+
+        ctx.route("**/*", _block)
         return ctx
 
     async def _get_page(self, ctx):
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         self.current_page = page
+        page.set_default_timeout(6000)
         return page
 
     # ---------- utilitários de login / 2FA ----------
@@ -739,10 +751,10 @@ class DuokeBot:
         Loop infinito, com auto-recuperação.
         Use este método a partir do app_ui (start/stop via task).
         """
-        while True:
-            ctx = None
-            try:
-                async with async_playwright() as p:
+        async with async_playwright() as p:
+            while True:
+                ctx = None
+                try:
                     ctx = await self._new_context(p)
                     page = await self._get_page(ctx)
                     await self.ensure_login(page)
@@ -751,25 +763,25 @@ class DuokeBot:
                         await self._cycle(page, decide_reply_fn)
                         await asyncio.sleep(idle_seconds)
 
-            except asyncio.CancelledError:
-                try:
-                    if ctx:
-                        await ctx.close()
+                except asyncio.CancelledError:
+                    try:
+                        if ctx:
+                            await ctx.close()
+                    finally:
+                        self.current_page = None
+                    break
+                except PwError as e:
+                    print(f"[ERROR] Playwright: {e}. Reiniciando em 2s...")
+                    await asyncio.sleep(2)
+                    continue
+                except Exception as e:
+                    print(f"[ERROR] run_forever: {e}. Tentando novamente em 2s...")
+                    await asyncio.sleep(2)
+                    continue
                 finally:
+                    try:
+                        if ctx:
+                            await ctx.close()
+                    except Exception:
+                        pass
                     self.current_page = None
-                break
-            except PwError as e:
-                print(f"[ERROR] Playwright: {e}. Reiniciando em 2s...")
-                await asyncio.sleep(2)
-                continue
-            except Exception as e:
-                print(f"[ERROR] run_forever: {e}. Tentando novamente em 2s...")
-                await asyncio.sleep(2)
-                continue
-            finally:
-                try:
-                    if ctx:
-                        await ctx.close()
-                except Exception:
-                    pass
-                self.current_page = None
