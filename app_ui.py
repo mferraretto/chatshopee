@@ -113,6 +113,13 @@ HTML = Template(r"""
             <button id="skipBtn" class="secondary">Pular</button>
           </div>
 
+          <div class="row" style="margin-top:8px;">
+            <button id="btnCloseModal" class="secondary">Fechar modal</button>
+
+            <input id="codeInput" type="text" placeholder="Código de verificação" style="width:180px;">
+            <button id="btnSendCode">Enviar código</button>
+          </div>
+
           <h4>Logs</h4>
           <div id="log"></div>
           <small class="mut">Dica: mantenha esta aba aberta para não derrubar o WebSocket atrás de proxies.</small>
@@ -249,6 +256,20 @@ document.getElementById('sendBtn').onclick = async () => {
 document.getElementById('skipBtn').onclick = async () => {
   await fetch('/action/skip', {method:'POST'});
 }
+
+document.getElementById('btnCloseModal').onclick = async () => {
+  await fetch('/action/close-modal', {method:'POST'});
+};
+
+document.getElementById('btnSendCode').onclick = async () => {
+  const code = (document.getElementById('codeInput').value || '').trim();
+  if (!code) { alert('Digite o código.'); return; }
+  await fetch('/action/submit-code', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ code })
+  });
+};
 
 // ====== Duoke: conectar / desconectar / status ======
 async function refreshDuokeStatus(){
@@ -618,4 +639,40 @@ async def action_send(req: Request):
 async def action_skip():
     ws_broadcast({"snapshot": {"last_action": "skipped"}})
     log("[UI] conversa pulada manualmente.")
+    return JSONResponse({"ok": True})
+
+
+@app.post("/action/close-modal")
+async def action_close_modal():
+    bot = _bot
+    page = getattr(bot, "current_page", None) if bot else None
+    if page and bot:
+        try:
+            ok = await bot.close_modal(page)
+            if ok:
+                log("[UI] modal fechado manualmente.")
+            else:
+                log("[UI] nenhum modal visível.")
+        except Exception as e:
+            log(f"[UI] erro ao fechar modal: {type(e).__name__}: {e}")
+            return JSONResponse({"ok": False, "error": str(e)})
+    return JSONResponse({"ok": True})
+
+
+@app.post("/action/submit-code")
+async def action_submit_code(req: Request):
+    data = await req.json()
+    code = (data.get("code") or "").strip()
+    bot = _bot
+    page = getattr(bot, "current_page", None) if bot else None
+    if page and bot and code:
+        try:
+            await bot.enter_verification_code(page, code)
+            ws_broadcast({"snapshot": {"last_action": "code_submitted"}})
+            log("[UI] código de verificação enviado.")
+        except Exception as e:
+            log(f"[UI] erro ao enviar código: {type(e).__name__}: {e}")
+            return JSONResponse({"ok": False, "error": str(e)})
+    elif not code:
+        return JSONResponse({"ok": False, "error": "Código vazio."})
     return JSONResponse({"ok": True})

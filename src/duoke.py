@@ -179,6 +179,12 @@ class DuokeBot:
             timeout=settings.goto_timeout_ms,
         )
 
+        try:
+            await page.wait_for_timeout(800)
+            await self.close_modal(page)
+        except Exception:
+            pass
+
         # Aguarda rede “assentar”
         try:
             await page.wait_for_load_state("networkidle", timeout=30000)
@@ -526,6 +532,61 @@ class DuokeBot:
                     await btn.first.click()
         except Exception:
             pass
+
+    # ---------- ações manuais de login/2FA ----------
+
+    async def close_modal(self, page):
+        """Fecha o modal de aviso/confirm se estiver aberto."""
+        try:
+            sel = SEL.get("modal_confirm_button") or ""
+            if not sel:
+                # fallback por texto
+                btn = page.get_by_role("button", name=re.compile(r"^(OK|Confirm|Fechar|Entendi)$", re.I))
+                await btn.first.click(timeout=3000)
+                return True
+            btn = page.locator(sel)
+            if await btn.count() > 0:
+                await btn.first.click(timeout=3000)
+                await page.wait_for_timeout(500)
+                return True
+        except Exception:
+            pass
+        return False
+
+    async def enter_verification_code(self, page, code: str):
+        """Digita o código de verificação e confirma."""
+        code = (code or "").strip()
+        if not code:
+            raise RuntimeError("Código vazio.")
+        # input
+        ipt_sel = SEL.get("verify_code_input") or ""
+        try:
+            if ipt_sel:
+                ipt = page.locator(ipt_sel).first
+            else:
+                ipt = page.get_by_placeholder(re.compile(r"code|c[oó]digo", re.I)).first
+            await ipt.wait_for(state="visible", timeout=8000)
+            await ipt.click()
+            try:
+                await ipt.fill(code)
+            except Exception:
+                await ipt.type(code, delay=30)
+        except Exception as e:
+            raise RuntimeError(f"Campo de código não encontrado: {e}")
+
+        # submit
+        try:
+            sub_sel = SEL.get("verify_submit") or ""
+            if sub_sel:
+                btn = page.locator(sub_sel).first
+            else:
+                btn = page.get_by_role("button", name=re.compile(r"(Verify|Confirm|Enviar|OK)", re.I)).first
+            await btn.click(timeout=5000)
+        except Exception:
+            # fallback: Enter
+            await page.keyboard.press("Enter")
+        await page.wait_for_timeout(800)
+        return True
 
     # ---------- utilidades ----------
 
