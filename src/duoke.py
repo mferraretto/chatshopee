@@ -205,7 +205,8 @@ class DuokeBot:
         email, password = self._get_creds()
         if not email or not password:
             raise RuntimeError(
-                "Credenciais Duoke ausentes. Defina DUOKE_EMAIL e DUOKE_PASSWORD (ou settings.duoke_email/duoke_password)."
+                "Credenciais Duoke ausentes. Defina DUOKE_EMAIL e DUOKE_PASSWORD (ou settings.duoke_email/duoke_password). "
+                "Como alternativa, faça login manual executando `python -m src.login` antes de iniciar o bot."
             )
 
         # Preenche e tenta logar

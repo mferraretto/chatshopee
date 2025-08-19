@@ -1,10 +1,12 @@
 # src/run_loop.py
 import os
 import asyncio
+from pathlib import Path
 from .duoke import DuokeBot
 from .classifier import decide_reply
 
 DEFAULT_INTERVAL = float(os.getenv("LOOP_INTERVAL_SECONDS", "5"))
+STATE_FILE = Path(__file__).resolve().parents[1] / "storage_state.json"
 
 async def run_forever(interval: float = DEFAULT_INTERVAL) -> None:
     """
@@ -37,6 +39,9 @@ async def run_forever(interval: float = DEFAULT_INTERVAL) -> None:
             backoff = min(wait * 2, 60.0)
 
 async def main() -> None:
+    if not STATE_FILE.exists():
+        print("[LOOP] Sessão não encontrada. Execute `python -m src.login` para fazer login antes de iniciar o bot.")
+        return
     await run_forever()
 
 if __name__ == "__main__":

@@ -4,7 +4,9 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 from .config import settings
 
-PROFILE_DIR = Path(__file__).resolve().parents[1] / ".playwright_profile"
+# Usa o mesmo diretório de perfil que o bot principal para que o login
+# manual possa ser reutilizado pelas execuções automatizadas.
+PROFILE_DIR = Path(__file__).resolve().parents[1] / "pw-user-data"
 STATE_FILE = Path(__file__).resolve().parents[1] / "storage_state.json"
 
 async def main():
