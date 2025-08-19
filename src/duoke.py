@@ -65,17 +65,36 @@ class DuokeBot:
                 "--disable-gpu",
             ],
         )
+        
+async def _route_handler(route):
+    req = route.request
+    try:
+        url = req.url.lower()
+        # corta fontes, mídia e chamadas de analytics para reduzir I/O e evitar travas
+        if req.resource_type in {"font", "media"} or "analytics" in url or "font" in url:
+            await route.abort()
+        else:
+            await route.continue_()
+    except Exception:
+        # fallback defensivo para não quebrar o fluxo
+        try:
+            await route.continue_()
+        except Exception:
+            pass
 
-        # Bloqueia fontes, mídia e analytics para reduzir I/O
-        async def _block(route):
-            r = route.request
-            if r.resource_type in {"font", "media"} or "analytics" in r.url or "font" in r.url:
-                await route.abort()
-            else:
-                await route.continue_()
+# importante: no contexto assíncrono, route deve ser aguardado
+await ctx.route("**/*", _route_handler)
 
-        ctx.route("**/*", _block)
-        return ctx
+# injeta CSS para não depender de animações/transitions que atrasam cliques
+ctx.add_init_script("""
+(() => {
+  const style = document.createElement('style');
+  style.innerHTML = '*{animation:none!important;transition:none!important;}';
+  document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
+})();
+""")
+
+return ctx
 
     async def _get_page(self, ctx):
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
@@ -580,25 +599,67 @@ class DuokeBot:
 
     # ---------- ações manuais de login/2FA ----------
 
-    async def close_modal(self, page):
-        """Fecha modais de aviso/confirm presentes na página ou iframes."""
+    async def close_modal(self, page, retries: int = 3):
+        """Fecha modais, tooltips ou anúncios tentando várias abordagens."""
         frames = [page] + list(page.frames)
-        for fr in frames:
-            try:
-                method = await self._click_confirm_anywhere(fr)
-            except Exception:
-                continue
-            if method:
-                # Aguarda o wrapper sumir
+        wrappers = [
+            ".el-message-box__wrapper",
+            ".el-dialog__wrapper",
+            ".ant-modal-root",
+            ".modal",
+            "[role='dialog']",
+            "[role='alert']",
+            "[class*='tooltip']",
+            "[class*='announcement']",
+        ]
+
+        for _ in range(retries):
+            for fr in frames:
                 try:
-                    await fr.locator(
-                        ".el-message-box__wrapper, .el-dialog__wrapper"
-                    ).locator(":visible").first.wait_for(state="hidden", timeout=3000)
+                    method = await self._click_confirm_anywhere(fr)
                 except Exception:
-                    await page.wait_for_timeout(500)
-                where = "iframe" if fr is not page else "page"
-                print(f"[DEBUG] close_modal: {method} in {where}")
-                return True
+                    continue
+                if method:
+                    try:
+                        await fr.locator(",".join(wrappers)).locator(":visible").first.wait_for(
+                            state="hidden", timeout=3000
+                        )
+                    except Exception:
+                        await page.wait_for_timeout(300)
+                    where = "iframe" if fr is not page else "page"
+                    print(f"[DEBUG] close_modal: {method} in {where}")
+                    return True
+
+            # Botões de fechar genéricos
+            try:
+                loc = page.locator(
+                    "button[aria-label='close'], .ant-modal-close, .close, [class*='close'] button"
+                ).locator(":visible")
+                if await loc.count() > 0:
+                    await loc.first.click()
+                    await page.wait_for_timeout(200)
+                    print("[DEBUG] close_modal: generic close button")
+                    return True
+            except Exception:
+                pass
+
+            # Fallback: tecla Escape
+            try:
+                await page.keyboard.press("Escape")
+            except Exception:
+                pass
+
+            # Remoção manual via DOM
+            try:
+                await page.evaluate(
+                    "sels => { for (const sel of sels) { document.querySelectorAll(sel).forEach(el => el.remove()); } }",
+                    wrappers,
+                )
+            except Exception:
+                pass
+
+            await page.wait_for_timeout(200)
+
         print("[DEBUG] close_modal: nenhum modal visível")
         return False
 
