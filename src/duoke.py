@@ -18,7 +18,7 @@ SEL = json.loads(
 
 # Botões de confirmação comuns em modais (várias línguas)
 CONFIRM_RE = re.compile(
-    r"(confirm|confirmar|ok|continue|verify|submit|login|entrar|fechar|确认|確定|确定)",
+    r"(confirm|confirmar|ok|continue|verify|submit|login|entrar|fechar|iniciar\s*sess[aã]o|确认|確定|确定)",
     re.I,
 )
 
@@ -260,7 +260,7 @@ class DuokeBot:
 
         # Clica Login (vários nomes)
         try:
-            await fr.get_by_role("button", name=re.compile(r"(login|entrar|sign\s*in|提交|登录)", re.I)).click(timeout=2500)
+            await fr.get_by_role("button", name=re.compile(r"(login|entrar|sign\s*in|iniciar\s*sess[aã]o|提交|登录)", re.I)).click(timeout=2500)
         except PWTimeoutError:
             # fallback: primeiro botão visível
             try:

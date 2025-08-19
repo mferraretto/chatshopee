@@ -8,7 +8,7 @@ if sys.platform.startswith("win"):
         pass
 # ----------------------------------------------------------------------
 
-import base64, json, time, os
+import base64, json, time, os, re
 from pathlib import Path
 from typing import Optional, Set
 from collections import deque
@@ -122,11 +122,14 @@ HTML = Template(r"""
 
           <h4 style="margin-top:16px;">Conectar ao Duoke</h4>
           <p class="mut" style="margin-top:0">Faça login aqui para salvar a sessão (cookies) como <code>storage_state.json</code>. O bot reutiliza essa sessão automaticamente.</p>
-          <form id="duoke-connect" class="row" onsubmit="return false;">
+          <form id="duoke-connect" onsubmit="return false;" style="display:flex; flex-direction:column; gap:8px; max-width:280px;">
             <input name="email" type="email" placeholder="Email Duoke" required />
             <input name="password" type="password" placeholder="Senha Duoke" required />
-            <button id="btnDuokeConnect" type="submit">Conectar ao Duoke</button>
-            <button id="btnDuokeDisconnect" type="button" class="secondary">Desconectar</button>
+            <input name="code" type="text" placeholder="Código de verificação" />
+            <div class="row">
+              <button id="btnDuokeConnect" type="submit">Conectar ao Duoke</button>
+              <button id="btnDuokeDisconnect" type="button" class="secondary">Desconectar</button>
+            </div>
           </form>
           <small id="duokeHint" class="mut"></small>
 
@@ -435,7 +438,7 @@ async def duoke_disconnect():
         raise HTTPException(500, f"Falha ao remover sessão: {e}")
 
 @app.post("/duoke/connect")
-async def duoke_connect(email: str = Form(...), password: str = Form(...)):
+async def duoke_connect(email: str = Form(...), password: str = Form(...), code: str = Form("")):
     """
     Faz login no Duoke com Playwright headless e persiste cookies em storage_state.json.
     """
@@ -476,13 +479,20 @@ async def duoke_connect(email: str = Form(...), password: str = Form(...)):
 
             await page.fill(email_sel, email)
             await page.fill(pass_sel, password)
+            if code:
+                code_sel = "input[name*='code' i], input[placeholder*='code' i], input[placeholder*='verification' i], input[type='tel']"
+                try:
+                    if await page.locator(code_sel).count() > 0:
+                        await page.fill(code_sel, code)
+                except Exception:
+                    pass
 
             # Tenta botão Login por role/name
             try:
-                await page.get_by_role("button", name="Login").click(timeout=3000)
+                await page.get_by_role("button", name=re.compile(r"(login|entrar|sign\s*in|iniciar\s*sess[aã]o)", re.I)).click(timeout=3000)
             except Exception:
                 # Fallback por texto parcial
-                btn = page.locator("button:has-text('Login'), button:has-text('Entrar')")
+                btn = page.locator("button:has-text('Login'), button:has-text('Entrar'), button:has-text('Iniciar sessão')")
                 if await btn.count() > 0:
                     await btn.first.click()
                 else:
