@@ -66,12 +66,12 @@ class DuokeBot:
             ],
         )
 
-        # Bloqueia fontes/mídia/analytics e evita travas; resiliente a exceções
+        # Bloqueia mídia/analytics e evita travas; resiliente a exceções
         async def _route_handler(route):
             req = route.request
             try:
                 url = req.url.lower()
-                if req.resource_type in {"font", "media"} or "analytics" in url or "font" in url:
+                if req.resource_type in {"media"} or "analytics" in url:
                     await route.abort()
                 else:
                     await route.continue_()
@@ -85,12 +85,17 @@ class DuokeBot:
         # importante: no contexto assíncrono, route deve ser aguardado
         await ctx.route("**/*", _route_handler)
 
-        # injeta CSS para não depender de animações/transitions que atrasam cliques
-        ctx.add_init_script("""
+        # injeta CSS e evita espera infinita por fontes
+        await ctx.add_init_script("""
         (() => {
           const style = document.createElement('style');
           style.innerHTML = '*{animation:none!important;transition:none!important;}';
-          document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
+          document.addEventListener('DOMContentLoaded', () => {
+            document.head.appendChild(style);
+            if (document.fonts && 'ready' in document.fonts) {
+              document.fonts.ready = Promise.resolve();
+            }
+          });
         })();
         """)
 
