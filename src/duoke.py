@@ -56,7 +56,7 @@ class DuokeBot:
 
         ctx = await p.chromium.launch_persistent_context(
             user_data_dir=str(user_data_dir),
-            headless=headless,  # << corrigido: usa variável
+            headless=headless,
             ignore_https_errors=True,
             viewport={"width": 1366, "height": 768},
             args=[
@@ -65,37 +65,36 @@ class DuokeBot:
                 "--disable-gpu",
             ],
         )
-        
-    async def _route_handler(route):
-        req = route.request
-        try:
-        url = req.url.lower()
-            # corta fontes, mídia e chamadas de analytics para reduzir I/O e evitar travas
-        if req.resource_type in {"font", "media"} or "analytics" in url or "font" in url:
-            await route.abort()
-        else:
-            await route.continue_()
-    except Exception:
-        # fallback defensivo para não quebrar o fluxo
-        try:
-            await route.continue_()
-        except Exception:
-            pass
 
-# importante: no contexto assíncrono, route deve ser aguardado
-    await ctx.route("**/*", _route_handler)
+        # Bloqueia fontes/mídia/analytics e evita travas; resiliente a exceções
+        async def _route_handler(route):
+            req = route.request
+            try:
+                url = req.url.lower()
+                if req.resource_type in {"font", "media"} or "analytics" in url or "font" in url:
+                    await route.abort()
+                else:
+                    await route.continue_()
+            except Exception:
+                # fallback defensivo para não quebrar o fluxo
+                try:
+                    await route.continue_()
+                except Exception:
+                    pass
 
-    # injeta CSS para não depender de animações/transitions que atrasam cliques
-    ctx.add_init_script("""
-    (() => {
-      const style = document.createElement('style');
-      style.innerHTML = '*{animation:none!important;transition:none!important;}';
-      document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
-    })();
-    """)
+        # importante: no contexto assíncrono, route deve ser aguardado
+        await ctx.route("**/*", _route_handler)
 
-    return ctx
+        # injeta CSS para não depender de animações/transitions que atrasam cliques
+        ctx.add_init_script("""
+        (() => {
+          const style = document.createElement('style');
+          style.innerHTML = '*{animation:none!important;transition:none!important;}';
+          document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
+        })();
+        """)
 
+        return ctx
     async def _get_page(self, ctx):
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         self.current_page = page
